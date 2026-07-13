@@ -270,6 +270,7 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
     updateFps(now);
     if (platform.debug.enabled && now - lastDebugReport >= 200) {
       lastDebugReport = now;
+      const joystick = platform.input.getJoystickState();
       platform.debug.report({
         phase: state.phase,
         level: state.levelId,
@@ -279,7 +280,12 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         enemyBullets: world.enemyBullets.activeCount,
         fps: fps.toFixed(1),
         musicEnabled: settings.music,
-        sfxEnabled: settings.sfx
+        sfxEnabled: settings.sfx,
+        joystickActive: joystick.active,
+        joystickCenterX: joystick.center.x.toFixed(2),
+        joystickCenterY: joystick.center.y.toFixed(2),
+        joystickVectorX: joystick.vector.x.toFixed(3),
+        joystickVectorY: joystick.vector.y.toFixed(3)
       });
     }
     renderer.setDpr(platform.viewport.devicePixelRatio());
