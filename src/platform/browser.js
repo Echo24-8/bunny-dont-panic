@@ -8,13 +8,31 @@ function normalizeVector(x, y) {
   return length > 1 ? { x: x / length, y: y / length } : { x, y };
 }
 
-export function joystickVectorFromPoint(point, center = { x: 68, y: 548 }, radius = 42) {
+export function joystickVectorFromPoint(point, center, deadZone = 4, fullSpeedDistance = 24) {
   const dx = point.x - center.x;
   const dy = point.y - center.y;
   const distance = Math.hypot(dx, dy);
-  return distance > radius
-    ? { x: dx / distance, y: dy / distance }
-    : { x: dx / radius, y: dy / radius };
+  if (distance <= deadZone) return { x: 0, y: 0 };
+  const strength = distance >= fullSpeedDistance
+    ? 1
+    : 0.35 + 0.65 * ((distance - deadZone) / (fullSpeedDistance - deadZone));
+  return { x: (dx / distance) * strength, y: (dy / distance) * strength };
+}
+
+export function followJoystickCenter(point, center, radius = 42) {
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= radius) return { ...center };
+  const overflow = distance - radius;
+  return {
+    x: center.x + (dx / distance) * overflow,
+    y: center.y + (dy / distance) * overflow
+  };
+}
+
+export function isJoystickTrigger(point, enabled) {
+  return enabled && point.y >= LOGICAL_HEIGHT / 2;
 }
 
 function createInputAdapter(canvas) {
