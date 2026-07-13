@@ -27,6 +27,29 @@ export function getUpgradeChoices({ build, health, rng = Math.random, count = 3 
   return choices;
 }
 
+export function getUpgradePreview(state, id) {
+  if (id === 'heart') {
+    return {
+      levelText: '',
+      valueText: `生命 ${state.health}/${state.maxHealth} → ${Math.min(state.maxHealth, state.health + 1)}/${state.maxHealth}`
+    };
+  }
+
+  const current = state.build[id] ?? 0;
+  const nextBuild = { ...state.build, [id]: current + 1 };
+  const before = derivePlayerStats(state.build);
+  const after = derivePlayerStats(nextBuild);
+  const levelText = `Lv ${current} → ${current + 1}`;
+  const valueText = {
+    rapidFire: `射击间隔 ${Math.round(before.fireIntervalMs)}ms → ${Math.round(after.fireIntervalMs)}ms`,
+    splitShot: `弹丸 ${before.projectileCount} 发 → ${after.projectileCount} 发`,
+    pierce: `额外穿透 ${before.pierce} → ${after.pierce}`,
+    moveSpeed: `移速 ${Math.round(before.speed)} → ${Math.round(after.speed)}`,
+    shield: `护盾 ${current === 0 ? '无' : `${(before.shieldRechargeMs / 1000).toFixed(1)}s`} → ${(after.shieldRechargeMs / 1000).toFixed(1)}s`
+  }[id];
+  return { levelText, valueText };
+}
+
 export function applyUpgrade(state, id) {
   const definition = UPGRADE_DEFINITIONS.find((entry) => entry.id === id);
   if (!definition) return false;

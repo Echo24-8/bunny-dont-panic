@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, startNewRun } from '../src/core/state.js';
-import { applyUpgrade, derivePlayerStats, getUpgradeChoices, upgradeThreshold } from '../src/core/upgrades.js';
+import {
+  applyUpgrade,
+  derivePlayerStats,
+  getUpgradeChoices,
+  getUpgradePreview,
+  upgradeThreshold
+} from '../src/core/upgrades.js';
 
 test('upgrade threshold follows the approved linear curve', () => {
   assert.equal(upgradeThreshold(0), 8);
@@ -34,3 +40,23 @@ test('upgrades change derived combat statistics', () => {
   assert.ok(stats.speed > 190);
 });
 
+test('upgrade previews match the applied combat values', () => {
+  const cases = [
+    ['rapidFire', 'Lv 0 → 1', '射击间隔 420ms → 378ms'],
+    ['splitShot', 'Lv 0 → 1', '弹丸 1 发 → 2 发'],
+    ['pierce', 'Lv 0 → 1', '额外穿透 0 → 1'],
+    ['moveSpeed', 'Lv 0 → 1', '移速 190 → 205'],
+    ['shield', 'Lv 0 → 1', '护盾 无 → 14.0s']
+  ];
+  for (const [id, levelText, valueText] of cases) {
+    const state = startNewRun(createInitialState());
+    assert.deepEqual(getUpgradePreview(state, id), { levelText, valueText });
+  }
+
+  const damaged = startNewRun(createInitialState());
+  damaged.health = 2;
+  assert.deepEqual(getUpgradePreview(damaged, 'heart'), {
+    levelText: '',
+    valueText: '生命 2/3 → 3/3'
+  });
+});
