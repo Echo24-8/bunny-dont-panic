@@ -306,8 +306,9 @@ function drawPlayerAndShield(ctx, assets, player, state, now, reducedMotion) {
   }
 }
 
-function drawParticles(ctx, particles) {
+function drawParticles(ctx, particles, reducedMotion) {
   particles.forEachActive((particle) => {
+    if (reducedMotion && particle.kind === 'graze') return;
     ctx.globalAlpha = Math.max(0, Math.min(1, particle.lifeMs / 500));
     ctx.fillStyle = particle.color;
     ctx.beginPath();
@@ -351,7 +352,7 @@ function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
   drawPickupsEnemiesAndPlayerBullets(ctx, assets, world, now, reducedMotion);
   drawEnemyBulletsBatched(ctx, world.enemyBullets);
   drawPlayerAndShield(ctx, assets, world.player, state, now, reducedMotion);
-  drawParticles(ctx, world.particles);
+  drawParticles(ctx, world.particles, reducedMotion);
   drawHitCore(ctx, world.player);
   drawHud(ctx, state, now, reducedMotion);
   drawJoystickOutline(ctx, joystick);

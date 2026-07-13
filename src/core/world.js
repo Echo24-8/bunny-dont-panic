@@ -25,7 +25,7 @@ export function createWorld(rng = Math.random) {
     playerBullets: new ObjectPool(POOL_LIMITS.PLAYER_BULLETS, () => ({ ...entityFactory(), pierceLeft: 0, damage: 1 })),
     enemyBullets: new ObjectPool(POOL_LIMITS.ENEMY_BULLETS, () => ({ ...entityFactory(), grazed: false })),
     pickups: new ObjectPool(POOL_LIMITS.PICKUPS, () => ({ ...entityFactory(), value: 2 })),
-    particles: new ObjectPool(POOL_LIMITS.PARTICLES, () => ({ ...entityFactory(), lifeMs: 0, color: '#ffffff', size: 2 })),
+    particles: new ObjectPool(POOL_LIMITS.PARTICLES, () => ({ ...entityFactory(), lifeMs: 0, color: '#ffffff', size: 2, kind: 'combat' })),
     spawnCooldownMs: 0,
     aimedCooldownMs: 0,
     patternCooldownMs: 0,
@@ -108,7 +108,7 @@ function spawnEnemy(world, levelId) {
   });
 }
 
-function spawnParticleBurst(world, x, y, color, count = 6) {
+function spawnParticleBurst(world, x, y, color, count = 6, kind = 'combat') {
   for (let index = 0; index < count; index += 1) {
     const angle = world.rng() * Math.PI * 2;
     const speed = 18 + world.rng() * 45;
@@ -120,6 +120,7 @@ function spawnParticleBurst(world, x, y, color, count = 6) {
       lifeMs: 360 + world.rng() * 260,
       color,
       size: 1.5 + world.rng() * 2.5,
+      kind,
       ageMs: 0
     });
   }
@@ -324,6 +325,7 @@ function resolveCombatCollisions(world, state, events) {
     if (!bullet.grazed && distance > hitDistance && distance <= hitDistance + 8) {
       bullet.grazed = true;
       if (world.grazeEffectCooldownMs <= 0) {
+        spawnParticleBurst(world, bullet.x, bullet.y, '#fff3b0', 2, 'graze');
         events.push({ type: 'grazed', x: bullet.x, y: bullet.y });
         world.grazeEffectCooldownMs = 100;
       }

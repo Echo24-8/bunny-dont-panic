@@ -73,6 +73,8 @@ test('graze emits once and pooled enemy bullets reset their graze state', () => 
   assert.equal(firstEvents.filter((event) => event.type === 'grazed').length, 1);
   assert.equal(state.health, 3);
   assert.equal(bullet.grazed, true);
+  assert.equal(world.particles.activeCount, 2);
+  world.particles.forEachActive((particle) => assert.equal(particle.kind, 'graze'));
 
   const secondEvents = updateWorld({ world, state, input: idleInput, dtMs: 1 });
   assert.equal(secondEvents.some((event) => event.type === 'grazed'), false);
