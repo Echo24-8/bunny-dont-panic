@@ -1,0 +1,13 @@
+{
+  "name": "bunny-dont-panic",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/dev-server.mjs",
+    "test": "node --test",
+    "generate:art": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/generate-art.ps1",
+    "generate:audio": "node tools/generate-audio.mjs"
+  }
+}
+

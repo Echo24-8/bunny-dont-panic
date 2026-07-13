@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#d8edf0">
+    <meta name="description" content="兔兔别慌，一款两关反差弹幕生存小游戏。">
+    <title>兔兔别慌</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="game-shell" aria-label="兔兔别慌游戏区域">
+      <canvas
+        id="game"
+        width="360"
+        height="640"
+        role="application"
+        aria-label="兔兔别慌。使用方向键或 WASD 移动，触屏设备使用左下摇杆。"
+        tabindex="0"
+      ></canvas>
+      <p id="game-status" class="sr-only" aria-live="polite">正在加载游戏</p>
+    </main>
+    <noscript>需要启用 JavaScript 才能运行游戏。</noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
+
