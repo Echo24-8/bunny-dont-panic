@@ -4,6 +4,7 @@ import { PHASES } from '../src/core/constants.js';
 import {
   beginLevelTwoTransition,
   createInitialState,
+  recordLevelTwoResult,
   retryLevelTwoState,
   startLevelTwo,
   startNewRun,
@@ -31,6 +32,14 @@ test('transition preserves health and build into level two', () => {
   assert.equal(state.remainingMs, 60_000);
 });
 
+test('level two starts with one second preparation and first attempt', () => {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  assert.equal(state.readyMs, 1_000);
+  assert.equal(state.remainingMs, 60_000);
+  assert.equal(state.level2Attempt, 1);
+});
+
 test('level two retry restores health and retains all selected abilities', () => {
   const state = startNewRun(createInitialState());
   startLevelTwo(state);
@@ -43,6 +52,39 @@ test('level two retry restores health and retains all selected abilities', () =>
   assert.equal(state.xp, 0);
   assert.equal(state.upgradeCount, 4);
   assert.equal(state.build.splitShot, 2);
+});
+
+test('retry increments attempt and preserves retained progression', () => {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  state.build.splitShot = 2;
+  state.upgradeCount = 4;
+  retryLevelTwoState(state);
+  assert.equal(state.readyMs, 1_000);
+  assert.equal(state.level2Attempt, 2);
+  assert.equal(state.health, 3);
+  assert.equal(state.xp, 0);
+  assert.equal(state.build.splitShot, 2);
+  assert.equal(state.upgradeCount, 4);
+});
+
+test('session best only increases and survives a new run', () => {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  recordLevelTwoResult(state, 'defeat', 12_300);
+  recordLevelTwoResult(state, 'defeat', 8_000);
+  assert.equal(state.sessionBestSurvivalMs, 12_300);
+  startNewRun(state);
+  assert.equal(state.sessionBestSurvivalMs, 12_300);
+  assert.equal(state.level2Attempt, 0);
+});
+
+test('recorded survival time is bounded to the level duration', () => {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  assert.deepEqual(recordLevelTwoResult(state, 'defeat', -10), { kind: 'defeat', survivalMs: 0 });
+  assert.deepEqual(recordLevelTwoResult(state, 'success', 61_000), { kind: 'success', survivalMs: 60_000 });
+  assert.equal(state.sessionBestSurvivalMs, 60_000);
 });
 
 test('damage grants invulnerability and prevents repeated loss', () => {
