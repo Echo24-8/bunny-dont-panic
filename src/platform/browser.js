@@ -1,4 +1,5 @@
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from '../core/constants.js';
+import { createBrowserSharingAdapter } from './share-browser.js';
 
 const SETTINGS_KEY = 'bunny-dont-panic.settings.v1';
 const MOVEMENT_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
@@ -299,6 +300,7 @@ export function createBrowserPlatform({ canvas, statusElement, audioManifest }) 
   const settings = storage.loadSettings();
   const lifecycle = createLifecycleAdapter(input);
   const audio = createAudioAdapter(audioManifest, settings);
+  const sharing = createBrowserSharingAdapter({ canvas });
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   const debugEnabled = new URLSearchParams(window.location.search).has('debug');
 
@@ -307,6 +309,7 @@ export function createBrowserPlatform({ canvas, statusElement, audioManifest }) 
     storage,
     audio,
     lifecycle,
+    sharing,
     haptics: { pulse: (duration = 18) => navigator.vibrate?.(duration) },
     preferences: { reducedMotion },
     viewport: { devicePixelRatio: () => Math.min(2, Math.max(1, Math.floor(window.devicePixelRatio || 1))) },
@@ -327,6 +330,7 @@ export function createBrowserPlatform({ canvas, statusElement, audioManifest }) 
       input.destroy();
       lifecycle.destroy();
       audio.destroy();
+      sharing.destroy();
     }
   };
 }
