@@ -1,11 +1,13 @@
 import { LEVELS, LOGICAL_HEIGHT, LOGICAL_WIDTH, PHASES } from '../core/constants.js';
+import { createResultSummary } from '../core/results.js';
 import { upgradeThreshold } from '../core/upgrades.js';
 
 export const UI_RECTS = Object.freeze({
   start: { x: 72, y: 438, width: 216, height: 58 },
   settings: { x: 300, y: 16, width: 44, height: 44 },
-  retry: { x: 72, y: 430, width: 216, height: 58 },
-  menu: { x: 98, y: 506, width: 164, height: 48 },
+  retry: { x: 72, y: 404, width: 216, height: 54 },
+  share: { x: 36, y: 478, width: 136, height: 48 },
+  menu: { x: 188, y: 478, width: 136, height: 48 },
   settingsMusic: { x: 52, y: 256, width: 256, height: 64 },
   settingsSfx: { x: 52, y: 336, width: 256, height: 64 },
   settingsClose: { x: 72, y: 448, width: 216, height: 54 }
@@ -205,11 +207,53 @@ function drawEnemy(ctx, image, enemy) {
   ctx.restore();
 }
 
-function drawWorld(ctx, assets, world, state, now, reducedMotion) {
-  drawBackground(ctx, assets, state.levelId || LEVELS.ONE);
-  world.pickups.forEachActive((pickup) => drawStar(ctx, pickup.x, pickup.y, 6 + Math.sin((now + pickup.poolIndex * 41) / 180) * 1.2));
-  world.enemies.forEachActive((enemy) => drawEnemy(ctx, assets[enemy.kind], enemy));
+function drawPatternWarning(ctx, warning, now, reducedMotion) {
+  if (!warning) return;
+  const sources = {
+    1: [[20, 180], [340, 180]],
+    2: [[180, 100]],
+    3: [[180, 96], [12, 260], [348, 260]],
+    4: [[180, 92], [14, 190], [346, 190]]
+  }[warning.nextBand] ?? [];
+  const pulse = reducedMotion ? 1 : 0.78 + Math.sin(now / 70) * 0.16;
+  ctx.beginPath();
+  for (const [x, y] of sources) {
+    ctx.moveTo(x + 16, y);
+    ctx.arc(x, y, 16, 0, Math.PI * 2);
+    const edgeX = x < 60 ? 3 : x > LOGICAL_WIDTH - 60 ? LOGICAL_WIDTH - 3 : x;
+    const edgeY = y < 120 ? 3 : y;
+    ctx.moveTo(edgeX - 9, edgeY);
+    ctx.lineTo(edgeX + 9, edgeY);
+  }
+  ctx.strokeStyle = 'rgba(231,85,96,.58)';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(255,247,232,${pulse})`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
 
+function drawJoystickBase(ctx, joystick) {
+  if (!joystick.active) return;
+  const center = joystick.center;
+  const knobX = center.x + joystick.vector.x * 28;
+  const knobY = center.y + joystick.vector.y * 28;
+  ctx.fillStyle = 'rgba(38,62,67,.14)';
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 43, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(250,253,247,.52)';
+  ctx.beginPath();
+  ctx.arc(knobX, knobY, 18, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawPickupsEnemiesAndPlayerBullets(ctx, assets, world, now, reducedMotion) {
+  world.pickups.forEachActive((pickup) => {
+    const bob = reducedMotion ? 0 : Math.sin((now + pickup.poolIndex * 41) / 180) * 1.2;
+    drawStar(ctx, pickup.x, pickup.y, 6 + bob);
+  });
+  world.enemies.forEachActive((enemy) => drawEnemy(ctx, assets[enemy.kind], enemy));
   world.playerBullets.forEachActive((bullet) => {
     ctx.save();
     ctx.translate(bullet.x, bullet.y);
@@ -225,34 +269,31 @@ function drawWorld(ctx, assets, world, state, now, reducedMotion) {
     ctx.fillRect(-2, -9, 4, 4);
     ctx.restore();
   });
+}
 
-  world.enemyBullets.forEachActive((bullet) => {
-    ctx.fillStyle = '#e64f5c';
-    ctx.strokeStyle = '#fff7e8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(bullet.x, bullet.y, bullet.radius + 0.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+function drawEnemyBulletsBatched(ctx, bullets) {
+  ctx.fillStyle = '#e64f5c';
+  ctx.strokeStyle = '#fff7e8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  bullets.forEachActive((bullet) => {
+    const radius = bullet.radius + 0.6;
+    ctx.moveTo(bullet.x + radius, bullet.y);
+    ctx.arc(bullet.x, bullet.y, radius, 0, Math.PI * 2);
   });
+  ctx.fill();
+  ctx.stroke();
+}
 
-  world.particles.forEachActive((particle) => {
-    ctx.globalAlpha = Math.max(0, Math.min(1, particle.lifeMs / 500));
-    ctx.fillStyle = particle.color;
-    ctx.beginPath();
-    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.globalAlpha = 1;
-
+function drawPlayerAndShield(ctx, assets, player, state, now, reducedMotion) {
   const invulnerableVisible = reducedMotion || state.invulnerableMs <= 0 || Math.floor(now / 80) % 2 === 0;
   if (invulnerableVisible) {
     const size = 54;
-    if (assets.bunny) ctx.drawImage(assets.bunny, world.player.x - size / 2, world.player.y - size / 2 - 4, size, size);
+    if (assets.bunny) ctx.drawImage(assets.bunny, player.x - size / 2, player.y - size / 2 - 13, size, size);
     else {
       ctx.fillStyle = '#fff9ec';
       ctx.beginPath();
-      ctx.arc(world.player.x, world.player.y, 17, 0, Math.PI * 2);
+      ctx.arc(player.x, player.y - 9, 17, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -260,13 +301,75 @@ function drawWorld(ctx, assets, world, state, now, reducedMotion) {
     ctx.strokeStyle = 'rgba(111,190,204,.9)';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(world.player.x, world.player.y, 27, 0, Math.PI * 2);
+    ctx.arc(player.x, player.y, 27, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
 
-function drawHud(ctx, state) {
-  fillRoundedRect(ctx, 10, 12, 118, 44, 8, 'rgba(250,253,247,.84)', 'rgba(38,62,67,.18)');
+function drawParticles(ctx, particles) {
+  particles.forEachActive((particle) => {
+    ctx.globalAlpha = Math.max(0, Math.min(1, particle.lifeMs / 500));
+    ctx.fillStyle = particle.color;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawHitCore(ctx, player) {
+  ctx.strokeStyle = '#fffdf5';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 7, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#263e43';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawJoystickOutline(ctx, joystick) {
+  if (!joystick.active) return;
+  const center = joystick.center;
+  const knobX = center.x + joystick.vector.x * 28;
+  const knobY = center.y + joystick.vector.y * 28;
+  ctx.strokeStyle = 'rgba(255,255,255,.72)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 43, 0, Math.PI * 2);
+  ctx.moveTo(knobX + 18, knobY);
+  ctx.arc(knobX, knobY, 18, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
+  const joystick = input.getJoystickState();
+  drawBackground(ctx, assets, state.levelId || LEVELS.ONE);
+  drawPatternWarning(ctx, world.patternWarning, now, reducedMotion);
+  drawJoystickBase(ctx, joystick);
+  drawPickupsEnemiesAndPlayerBullets(ctx, assets, world, now, reducedMotion);
+  drawEnemyBulletsBatched(ctx, world.enemyBullets);
+  drawPlayerAndShield(ctx, assets, world.player, state, now, reducedMotion);
+  drawParticles(ctx, world.particles);
+  drawHitCore(ctx, world.player);
+  drawHud(ctx, state, now, reducedMotion);
+  drawJoystickOutline(ctx, joystick);
+}
+
+function drawHud(ctx, state, now, reducedMotion) {
+  const criticalHealth = state.health === 1;
+  fillRoundedRect(
+    ctx,
+    10,
+    12,
+    118,
+    44,
+    8,
+    'rgba(250,253,247,.84)',
+    criticalHealth ? '#e75560' : 'rgba(38,62,67,.18)',
+    criticalHealth ? 2.5 : 1
+  );
   for (let index = 0; index < state.maxHealth; index += 1) drawHeart(ctx, 31 + index * 33, 23, 14, index < state.health);
   fillRoundedRect(ctx, 138, 12, 96, 44, 8, 'rgba(250,253,247,.9)', 'rgba(38,62,67,.18)');
   ctx.fillStyle = '#29474c';
@@ -283,24 +386,20 @@ function drawHud(ctx, state) {
   ctx.fillStyle = 'rgba(255,255,255,.9)';
   ctx.font = '700 11px "Microsoft YaHei UI", sans-serif';
   ctx.fillText(`第 ${state.levelId} 关`, 180, 88);
-}
 
-function drawJoystick(ctx, joystick) {
-  if (!joystick.active) return;
-  const center = joystick.center;
-  ctx.strokeStyle = 'rgba(255,255,255,.55)';
-  ctx.fillStyle = 'rgba(38,62,67,.18)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, 43, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  const knobX = center.x + joystick.vector.x * 28;
-  const knobY = center.y + joystick.vector.y * 28;
-  ctx.fillStyle = joystick.active ? 'rgba(250,253,247,.92)' : 'rgba(250,253,247,.7)';
-  ctx.beginPath();
-  ctx.arc(knobX, knobY, 18, 0, Math.PI * 2);
-  ctx.fill();
+  if (state.readyMs > 0) {
+    const alpha = reducedMotion ? 1 : 0.84 + Math.sin(now / 100) * 0.12;
+    fillRoundedRect(ctx, 120, 278, 120, 52, 8, `rgba(250,253,247,${alpha})`, '#526c67', 2);
+    ctx.fillStyle = '#29474c';
+    ctx.font = '900 22px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText('准备', 180, 304);
+  }
+
+  if (state.invulnerableMs > 820) {
+    ctx.strokeStyle = '#e75560';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, LOGICAL_WIDTH - 4, LOGICAL_HEIGHT - 4);
+  }
 }
 
 function drawUpgradeIcon(ctx, id, x, y) {
@@ -350,13 +449,18 @@ function drawUpgradeOverlay(ctx, choices) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#29474c';
     ctx.font = '800 18px "Microsoft YaHei UI", sans-serif';
-    ctx.fillText(choice.title, rect.x + 82, rect.y + 34);
-    ctx.fillStyle = '#5b706e';
-    ctx.font = '500 13px "Microsoft YaHei UI", sans-serif';
-    ctx.fillText(choice.description, rect.x + 82, rect.y + 61);
+    ctx.fillText(choice.title, rect.x + 82, rect.y + 34, 132);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#9b6c3e';
-    ctx.font = '800 12px ui-monospace, monospace';
+    ctx.font = '800 11px ui-monospace, monospace';
+    ctx.fillText(choice.preview?.levelText ?? '', rect.x + rect.width - 18, rect.y + 35, 74);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#5b706e';
+    ctx.font = '500 13px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText(choice.preview?.valueText ?? choice.description, rect.x + 82, rect.y + 61, rect.width - 104);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#9b6c3e';
+    ctx.font = '800 10px ui-monospace, monospace';
     ctx.fillText(String(index + 1), rect.x + rect.width - 18, rect.y + 18);
   });
 }
@@ -376,10 +480,21 @@ function drawTransition(ctx, assets, state) {
   ctx.fillRect(94, 350, Math.max(0, 172 * (1 - state.transitionMs / 1200)), 5);
 }
 
-function drawResult(ctx, assets, state) {
+function shareStatusLabel(status) {
+  return {
+    shared: '已分享',
+    cancelled: '已取消',
+    copied: '战绩文字已复制',
+    downloaded: '战绩图片已保存',
+    'copied-and-downloaded': '文字已复制，图片已保存',
+    failed: '分享失败，请手动发送图片'
+  }[status] ?? '';
+}
+
+function drawResult(ctx, assets, state, shareStatus) {
   drawBackground(ctx, assets, LEVELS.TWO);
   ctx.fillStyle = 'rgba(246,250,238,.9)';
-  roundedRectPath(ctx, 36, 142, 288, 430, 8);
+  roundedRectPath(ctx, 28, 88, 304, 472, 8);
   ctx.fill();
   ctx.strokeStyle = 'rgba(38,62,67,.28)';
   ctx.lineWidth = 2;
@@ -388,16 +503,34 @@ function drawResult(ctx, assets, state) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#29474c';
-  ctx.font = '900 32px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText(success ? '你居然撑住了' : '兔兔尽力了', 180, 208);
+  ctx.font = '900 30px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(success ? '你居然撑住了' : '兔兔尽力了', 180, 142);
   ctx.fillStyle = success ? '#4f8c69' : '#c64552';
-  ctx.font = '900 52px ui-monospace, "Cascadia Mono", monospace';
-  const seconds = ((state.result?.survivalMs ?? 0) / 1000).toFixed(1);
-  ctx.fillText(`${seconds}s`, 180, 286);
+  ctx.font = '900 48px ui-monospace, "Cascadia Mono", monospace';
+  const summary = createResultSummary(state);
+  const seconds = (summary.survivalMs / 1000).toFixed(1);
+  ctx.fillText(`${seconds}s`, 180, 213);
   ctx.fillStyle = '#5b706e';
-  ctx.font = '600 14px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText(success ? '第二关完成' : '本次存活时间', 180, 330);
+  ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(success ? '第二关完成' : '本次存活时间', 180, 255);
+
+  const attemptLine = summary.badge
+    ? `第 ${summary.attempt} 次挑战 · ${summary.badge}`
+    : `第 ${summary.attempt} 次挑战`;
+  const statisticLines = [
+    `会话最佳 ${(summary.bestSurvivalMs / 1000).toFixed(1)} 秒`,
+    attemptLine,
+    summary.buildSummary
+  ];
+  ctx.fillStyle = '#455f61';
+  ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
+  statisticLines.forEach((line, index) => ctx.fillText(line, 180, 305 + index * 26, 260));
+  ctx.fillStyle = '#8a4a50';
+  ctx.font = '700 11px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(shareStatusLabel(shareStatus), 180, 390, 260);
+
   drawButton(ctx, UI_RECTS.retry, success ? '再玩一次' : '再试一次');
+  drawButton(ctx, UI_RECTS.share, '分享战绩', 'secondary');
   drawButton(ctx, UI_RECTS.menu, '返回首页', 'secondary');
 }
 
@@ -439,6 +572,81 @@ function drawPaused(ctx) {
   ctx.fillText('已暂停', 180, 315);
 }
 
+function drawShareBackground(ctx, image) {
+  ctx.fillStyle = '#9fc5bd';
+  ctx.fillRect(0, 0, 1080, 1440);
+  if (!image) return;
+  const sourceWidth = image.naturalWidth || image.width || 1080;
+  const sourceHeight = image.naturalHeight || image.height || 1440;
+  const scale = Math.max(1080 / sourceWidth, 1440 / sourceHeight);
+  const sourceCropWidth = 1080 / scale;
+  const sourceCropHeight = 1440 / scale;
+  const sourceX = (sourceWidth - sourceCropWidth) / 2;
+  const sourceY = (sourceHeight - sourceCropHeight) / 2;
+  ctx.drawImage(image, sourceX, sourceY, sourceCropWidth, sourceCropHeight, 0, 0, 1080, 1440);
+}
+
+function createShareImage(assets, summary) {
+  const offscreen = globalThis.document?.createElement?.('canvas');
+  if (!offscreen) return Promise.reject(new Error('share-image-failed'));
+  offscreen.width = 1080;
+  offscreen.height = 1440;
+  const ctx = offscreen.getContext('2d');
+  if (!ctx) return Promise.reject(new Error('share-image-failed'));
+
+  drawShareBackground(ctx, assets.background2);
+  ctx.fillStyle = 'rgba(248,251,241,.88)';
+  fillRoundedRect(ctx, 72, 72, 936, 1296, 24, 'rgba(248,251,241,.88)', 'rgba(38,62,67,.28)', 5);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#29474c';
+  ctx.font = '900 86px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('兔兔别慌', 540, 184, 840);
+  ctx.fillStyle = '#526c67';
+  ctx.font = '700 34px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('极难第二关战绩', 540, 262);
+
+  const success = summary.kind === 'success';
+  ctx.fillStyle = success ? '#4f8c69' : '#c64552';
+  ctx.font = '900 150px ui-monospace, "Cascadia Mono", monospace';
+  ctx.fillText(`${(summary.survivalMs / 1000).toFixed(1)}s`, 540, 458, 820);
+  ctx.fillStyle = '#526c67';
+  ctx.font = '700 38px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(success ? '成功撑满 60 秒' : '本次存活时间', 540, 570);
+
+  ctx.fillStyle = '#29474c';
+  ctx.font = '800 42px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(`会话最佳 ${(summary.bestSurvivalMs / 1000).toFixed(1)} 秒`, 540, 704, 820);
+  ctx.fillText(`第 ${summary.attempt} 次挑战`, 540, 786, 820);
+  if (summary.badge) {
+    ctx.fillStyle = '#9b6c3e';
+    ctx.fillText(summary.badge, 540, 868, 820);
+  }
+
+  ctx.fillStyle = '#f2ca63';
+  ctx.fillRect(200, 944, 680, 6);
+  ctx.fillStyle = '#455f61';
+  ctx.font = '700 40px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(summary.buildSummary, 540, 1038, 820);
+  ctx.fillStyle = '#657b77';
+  ctx.font = '600 32px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('当前能力构筑', 540, 1102);
+  ctx.fillStyle = '#29474c';
+  ctx.font = '800 36px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('两关生存挑战', 540, 1262);
+
+  return new Promise((resolve, reject) => {
+    if (typeof offscreen.toBlob !== 'function') {
+      reject(new Error('share-image-failed'));
+      return;
+    }
+    offscreen.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('share-image-failed'));
+    }, 'image/png');
+  });
+}
+
 export function createRenderer(canvas, assets, { reducedMotion = false, dpr = 1 } = {}) {
   ensureResolution(canvas, dpr);
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -450,16 +658,17 @@ export function createRenderer(canvas, assets, { reducedMotion = false, dpr = 1 
       dpr = nextDpr;
       ensureResolution(canvas, dpr);
     },
-    render({ state, world, choices, input, settings, now, fps }) {
+    createShareImage(summary) {
+      return createShareImage(assets, summary);
+    },
+    render({ state, world, choices, input, settings, now, fps, shareStatus = '' }) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
       if (state.phase === PHASES.MENU) drawMenu(ctx, assets, now, reducedMotion);
       else if (state.phase === PHASES.TRANSITION) drawTransition(ctx, assets, state);
-      else if (state.phase === PHASES.RESULT) drawResult(ctx, assets, state);
+      else if (state.phase === PHASES.RESULT) drawResult(ctx, assets, state, shareStatus);
       else {
-        drawWorld(ctx, assets, world, state, now, reducedMotion);
-        drawHud(ctx, state);
-        drawJoystick(ctx, input.getJoystickState());
+        drawWorld(ctx, assets, world, state, input, now, reducedMotion);
         if (state.phase === PHASES.UPGRADE) drawUpgradeOverlay(ctx, choices);
       }
       if (state.paused && !state.settingsOpen && state.phase !== PHASES.MENU && state.phase !== PHASES.RESULT) drawPaused(ctx);
