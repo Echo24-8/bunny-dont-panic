@@ -286,6 +286,7 @@ function drawHud(ctx, state) {
 }
 
 function drawJoystick(ctx, joystick) {
+  if (!joystick.active) return;
   const center = joystick.center;
   ctx.strokeStyle = 'rgba(255,255,255,.55)';
   ctx.fillStyle = 'rgba(38,62,67,.18)';

@@ -44,11 +44,9 @@ function createInputAdapter(canvas) {
   let confirmCount = 0;
   let joystickPointerId = null;
   let joystickVector = { x: 0, y: 0 };
-  let joystickPulseVector = { x: 0, y: 0 };
-  let joystickPulseUntil = 0;
   let joystickActive = false;
   let joystickEnabled = false;
-  const joystickCenter = { x: 68, y: 548 };
+  let joystickCenter = { x: 68, y: 548 };
 
   function toLogical(event) {
     const rect = canvas.getBoundingClientRect();
@@ -59,16 +57,19 @@ function createInputAdapter(canvas) {
   }
 
   function updateJoystick(point) {
+    joystickCenter = followJoystickCenter(point, joystickCenter);
     joystickVector = joystickVectorFromPoint(point, joystickCenter);
   }
 
   function onPointerDown(event) {
     const point = toLogical(event);
     canvas.focus({ preventScroll: true });
-    if (joystickEnabled && point.x <= 150 && point.y >= 420 && joystickPointerId === null) {
+    if (joystickPointerId !== null) return;
+    if (isJoystickTrigger(point, joystickEnabled)) {
       joystickPointerId = event.pointerId;
+      joystickCenter = { ...point };
+      joystickVector = { x: 0, y: 0 };
       joystickActive = true;
-      updateJoystick(point);
       canvas.setPointerCapture?.(event.pointerId);
     } else {
       taps.push(point);
@@ -82,8 +83,6 @@ function createInputAdapter(canvas) {
 
   function releasePointer(event) {
     if (event.pointerId !== joystickPointerId) return;
-    joystickPulseVector = { ...joystickVector };
-    joystickPulseUntil = performance.now() + 90;
     joystickPointerId = null;
     joystickVector = { x: 0, y: 0 };
     joystickActive = false;
@@ -113,8 +112,6 @@ function createInputAdapter(canvas) {
     confirmCount = 0;
     joystickPointerId = null;
     joystickVector = { x: 0, y: 0 };
-    joystickPulseVector = { x: 0, y: 0 };
-    joystickPulseUntil = 0;
     joystickActive = false;
   }
 
@@ -135,7 +132,7 @@ function createInputAdapter(canvas) {
       );
       if (Math.hypot(keyboard.x, keyboard.y) > 0) return keyboard;
       if (joystickActive) return joystickVector;
-      return joystickPulseUntil > performance.now() ? joystickPulseVector : { x: 0, y: 0 };
+      return { x: 0, y: 0 };
     },
     consumeTaps() {
       return taps.splice(0, taps.length);
