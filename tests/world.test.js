@@ -148,6 +148,26 @@ test('level two enemies do not add aimed shots to the authored patterns', () => 
   assert.equal(world.enemyBullets.activeCount, 0);
 });
 
+test('standing still fails the authored opening within fifteen seconds', () => {
+  const simulate = (build = {}) => {
+    const state = startNewRun(createInitialState());
+    startLevelTwo(state);
+    state.readyMs = 0;
+    Object.assign(state.build, build);
+    state.shieldReady = state.build.shield > 0;
+    const world = createWorld(() => 0.5);
+    while (state.health > 0 && state.elapsedMs < 15_000) {
+      updateWorld({ world, state, input: idleInput, dtMs: 1000 / 60 });
+    }
+    return state.elapsedMs;
+  };
+
+  const baseSurvivalMs = simulate();
+  const maxBuildSurvivalMs = simulate({ rapidFire: 6, splitShot: 3, pierce: 3, moveSpeed: 6, shield: 5 });
+  assert.ok(baseSurvivalMs >= 5_000 && baseSurvivalMs <= 15_000, baseSurvivalMs);
+  assert.ok(maxBuildSurvivalMs <= 15_000, maxBuildSurvivalMs);
+});
+
 test('combat collisions create distinct hit shield and damage particles', () => {
   const hitState = startNewRun(createInitialState());
   startLevelTwo(hitState);

@@ -316,6 +316,8 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         level: state.levelId,
         health: state.health,
         readyMs: state.readyMs.toFixed(0),
+        remainingMs: state.remainingMs.toFixed(0),
+        elapsedMs: state.elapsedMs.toFixed(0),
         level2Attempt: state.level2Attempt,
         sessionBestSurvivalMs: state.sessionBestSurvivalMs.toFixed(0),
         playerX: world.player.x.toFixed(2),

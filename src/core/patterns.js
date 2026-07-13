@@ -14,7 +14,7 @@ export function getLevelTwoPatternSpec({ band, channel, shotIndex }) {
   const side = shotIndex % 2;
   if (band === 0 && channel === 'main') return {
     kind: 'ring', cooldownMs: 1_250, startDelayMs: 0,
-    args: { x: 180, y: 92, count: 24, speed: 96, gapAngle: [1.38, 1.76][side], gapWidth: Math.PI / 5, rotation: shotIndex * 0.1 }
+    args: { x: 180, y: 92, count: 24, speed: 96, gapAngle: [1.25, 1.89][side], gapWidth: Math.PI / 5, rotation: 0 }
   };
   if (band === 1 && channel === 'main') return {
     kind: 'fan', cooldownMs: 550, startDelayMs: 0,
