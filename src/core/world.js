@@ -1,6 +1,13 @@
 import { LEVELS, LOGICAL_HEIGHT, LOGICAL_WIDTH, POOL_LIMITS } from './constants.js';
 import { ObjectPool } from './object-pool.js';
-import { makeAimed, makeFan, makeRing, makeSpiralBullet } from './patterns.js';
+import {
+  getLevelTwoPatternSpec,
+  getLevelTwoPatternState,
+  makeAimed,
+  makeFan,
+  makeRing,
+  makeSpiralBullet
+} from './patterns.js';
 import { takeDamage } from './state.js';
 import { derivePlayerStats, upgradeThreshold } from './upgrades.js';
 
@@ -16,7 +23,7 @@ export function createWorld(rng = Math.random) {
     player: { x: 180, y: 510, radius: 7, fireCooldownMs: 0 },
     enemies: new ObjectPool(POOL_LIMITS.ENEMIES, () => ({ ...entityFactory(), hp: 1, maxHp: 1, kind: 'puff', shotCooldownMs: 0, xpValue: 2 })),
     playerBullets: new ObjectPool(POOL_LIMITS.PLAYER_BULLETS, () => ({ ...entityFactory(), pierceLeft: 0, damage: 1 })),
-    enemyBullets: new ObjectPool(POOL_LIMITS.ENEMY_BULLETS, entityFactory),
+    enemyBullets: new ObjectPool(POOL_LIMITS.ENEMY_BULLETS, () => ({ ...entityFactory(), grazed: false })),
     pickups: new ObjectPool(POOL_LIMITS.PICKUPS, () => ({ ...entityFactory(), value: 2 })),
     particles: new ObjectPool(POOL_LIMITS.PARTICLES, () => ({ ...entityFactory(), lifeMs: 0, color: '#ffffff', size: 2 })),
     spawnCooldownMs: 0,
@@ -24,7 +31,12 @@ export function createWorld(rng = Math.random) {
     patternCooldownMs: 0,
     secondaryPatternCooldownMs: 0,
     patternBand: -1,
-    spiralAngle: 0,
+    patternWarning: null,
+    mainShotIndex: 0,
+    secondaryShotIndex: 0,
+    grazeEffectCooldownMs: 0,
+    tutorialEnemySpawned: false,
+    tutorialBulletFired: false,
     shotSoundCooldownMs: 0,
     metrics: { droppedEnemyBullets: 0 }
   };
@@ -42,13 +54,18 @@ export function resetWorld(world) {
   world.patternCooldownMs = 0;
   world.secondaryPatternCooldownMs = 0;
   world.patternBand = -1;
-  world.spiralAngle = 0;
+  world.patternWarning = null;
+  world.mainShotIndex = 0;
+  world.secondaryShotIndex = 0;
+  world.grazeEffectCooldownMs = 0;
+  world.tutorialEnemySpawned = false;
+  world.tutorialBulletFired = false;
   world.shotSoundCooldownMs = 0;
   world.metrics.droppedEnemyBullets = 0;
 }
 
 function acquireEnemyBullet(world, specification) {
-  const bullet = world.enemyBullets.acquire({ ...specification, ageMs: 0 });
+  const bullet = world.enemyBullets.acquire({ ...specification, ageMs: 0, grazed: false });
   if (!bullet) world.metrics.droppedEnemyBullets += 1;
   return bullet;
 }
@@ -162,19 +179,50 @@ function updateEnemies(world, state, dtMs) {
     enemy.y += (dy / length) * enemy.speed * movementScale * dt;
     enemy.rotation += dt * (enemy.kind === 'star' ? 1.8 : 0.55);
     enemy.shotCooldownMs -= dtMs;
-    if (enemy.kind !== 'puff' && enemy.shotCooldownMs <= 0) {
-      const teachingOffset = state.levelId === LEVELS.ONE ? (enemy.poolIndex % 2 === 0 ? -52 : 52) : 0;
+    if (state.levelId === LEVELS.ONE && enemy.kind !== 'puff' && enemy.shotCooldownMs <= 0) {
+      const teachingOffset = enemy.poolIndex % 2 === 0 ? -52 : 52;
       const bullet = makeAimed({
         x: enemy.x,
         y: enemy.y,
         targetX: world.player.x + teachingOffset,
         targetY: world.player.y,
-        speed: state.levelId === 1 ? 58 : 112
+        speed: 58
       });
       acquireEnemyBullet(world, bullet);
-      enemy.shotCooldownMs = state.levelId === 1 ? 2_600 : (enemy.kind === 'star' ? 900 : 1_250);
+      enemy.shotCooldownMs = 2_600;
     }
   });
+}
+
+function updateLevelOneTutorial(world, state) {
+  if (!world.tutorialEnemySpawned) {
+    world.tutorialEnemySpawned = true;
+    world.enemies.acquire({
+      x: 304,
+      y: 500,
+      vx: 0,
+      vy: 0,
+      ageMs: 0,
+      rotation: 0,
+      kind: 'tutorial',
+      hp: 1,
+      maxHp: 1,
+      radius: 12,
+      speed: 0,
+      xpValue: 8,
+      shotCooldownMs: Infinity
+    });
+  }
+  if (!world.tutorialBulletFired && state.elapsedMs >= 3_600) {
+    world.tutorialBulletFired = true;
+    acquireEnemyBullet(world, makeAimed({
+      x: 180,
+      y: 260,
+      targetX: world.player.x,
+      targetY: world.player.y,
+      speed: 60
+    }));
+  }
 }
 
 function updateLevelOnePatterns(world, dtMs) {
@@ -186,74 +234,48 @@ function updateLevelOnePatterns(world, dtMs) {
   world.aimedCooldownMs = 2_500;
 }
 
-function getPatternBand(seconds) {
-  if (seconds < 10) return 0;
-  if (seconds < 25) return 1;
-  if (seconds < 40) return 2;
-  if (seconds < 55) return 3;
-  return 4;
+function emitPatternSpec(world, spec) {
+  if (!spec) return;
+  if (spec.kind === 'ring') emitBullets(world, makeRing(spec.args));
+  else if (spec.kind === 'fan') emitBullets(world, makeFan(spec.args));
+  else if (spec.kind === 'spiral') acquireEnemyBullet(world, makeSpiralBullet(spec.args));
 }
 
-function updateLevelTwoPatterns(world, state, dtMs) {
-  const seconds = state.elapsedMs / 1000;
-  const band = getPatternBand(seconds);
-  if (band !== world.patternBand) {
+function updateLevelTwoPatterns(world, state, dtMs, events) {
+  const patternState = getLevelTwoPatternState(state.elapsedMs);
+  const previousWarningBand = world.patternWarning?.nextBand ?? null;
+  world.patternWarning = patternState.warning;
+  if (world.patternWarning && world.patternWarning.nextBand !== previousWarningBand) {
+    events.push({ type: 'pattern-warning', nextBand: world.patternWarning.nextBand });
+  }
+
+  const { band } = patternState;
+  const enteredBand = band !== world.patternBand;
+  if (enteredBand) {
     world.patternBand = band;
+    world.mainShotIndex = 0;
+    world.secondaryShotIndex = 0;
     world.patternCooldownMs = 0;
-    world.secondaryPatternCooldownMs = 0;
+    world.secondaryPatternCooldownMs = getLevelTwoPatternSpec({
+      band,
+      channel: 'secondary',
+      shotIndex: 0
+    })?.startDelayMs ?? Infinity;
   }
   world.patternCooldownMs -= dtMs;
-  world.secondaryPatternCooldownMs -= dtMs;
+  if (!enteredBand) world.secondaryPatternCooldownMs -= dtMs;
 
-  const targetAngle = Math.atan2(world.player.y - 92, world.player.x - 180);
-  if (band === 0 && world.patternCooldownMs <= 0) {
-    emitBullets(world, makeRing({ x: 180, y: 92, count: 24, speed: 96, gapAngle: targetAngle, gapWidth: Math.PI / 5, rotation: seconds * 0.08 }));
-    world.patternCooldownMs = 1_250;
+  if (world.patternCooldownMs <= 0) {
+    const spec = getLevelTwoPatternSpec({ band, channel: 'main', shotIndex: world.mainShotIndex });
+    emitPatternSpec(world, spec);
+    world.mainShotIndex += spec ? 1 : 0;
+    world.patternCooldownMs = spec?.cooldownMs ?? Infinity;
   }
-  if (band === 1 && world.patternCooldownMs <= 0) {
-    const fromLeft = Math.floor(seconds * 2) % 2 === 0;
-    emitBullets(world, makeFan({
-      x: fromLeft ? 20 : 340,
-      y: 120 + ((seconds * 37) % 150),
-      targetX: world.player.x,
-      targetY: world.player.y,
-      count: 7,
-      spread: Math.PI * 0.54,
-      speed: 112
-    }));
-    world.patternCooldownMs = 550;
-  }
-  if (band === 2) {
-    if (world.patternCooldownMs <= 0) {
-      acquireEnemyBullet(world, makeSpiralBullet({ x: 180, y: 100, angle: world.spiralAngle, speed: 108 }));
-      world.spiralAngle += 0.27;
-      world.patternCooldownMs = 70;
-    }
-    if (world.secondaryPatternCooldownMs <= 0) {
-      emitBullets(world, makeFan({ x: 180, y: 100, targetX: world.player.x, targetY: world.player.y, count: 3, spread: 0.24, speed: 128 }));
-      world.secondaryPatternCooldownMs = 1_100;
-    }
-  }
-  if (band === 3) {
-    if (world.patternCooldownMs <= 0) {
-      emitBullets(world, makeRing({ x: 180, y: 96, count: 28, speed: 110, gapAngle: targetAngle, gapWidth: Math.PI / 7, rotation: seconds * 0.15 }));
-      world.patternCooldownMs = 1_000;
-    }
-    if (world.secondaryPatternCooldownMs <= 0) {
-      const fromLeft = Math.floor(seconds) % 2 === 0;
-      emitBullets(world, makeFan({ x: fromLeft ? 12 : 348, y: 260, targetX: world.player.x, targetY: world.player.y, count: 7, spread: 1.1, speed: 122 }));
-      world.secondaryPatternCooldownMs = 750;
-    }
-  }
-  if (band === 4) {
-    if (world.patternCooldownMs <= 0) {
-      emitBullets(world, makeRing({ x: 180, y: 92, count: 36, speed: 126, gapAngle: targetAngle, gapWidth: Math.PI / 10, rotation: seconds * 0.24 }));
-      world.patternCooldownMs = 700;
-    }
-    if (world.secondaryPatternCooldownMs <= 0) {
-      emitBullets(world, makeFan({ x: seconds % 1.2 < 0.6 ? 14 : 346, y: 190, targetX: world.player.x, targetY: world.player.y, count: 9, spread: 1.15, speed: 135 }));
-      world.secondaryPatternCooldownMs = 520;
-    }
+  if (world.secondaryPatternCooldownMs <= 0) {
+    const spec = getLevelTwoPatternSpec({ band, channel: 'secondary', shotIndex: world.secondaryShotIndex });
+    emitPatternSpec(world, spec);
+    world.secondaryShotIndex += spec ? 1 : 0;
+    world.secondaryPatternCooldownMs = spec?.cooldownMs ?? Infinity;
   }
 }
 
@@ -278,6 +300,7 @@ function resolveCombatCollisions(world, state, events) {
     world.enemies.forEachActive((enemy) => {
       if (!bullet.active || !enemy.active || !circlesTouch(bullet, enemy)) return;
       enemy.hp -= bullet.damage;
+      spawnParticleBurst(world, bullet.x, bullet.y, '#f8df72', 3);
       if (bullet.pierceLeft > 0) bullet.pierceLeft -= 1;
       else world.playerBullets.release(bullet);
       if (enemy.hp <= 0) {
@@ -290,9 +313,21 @@ function resolveCombatCollisions(world, state, events) {
 
   let hit = false;
   world.enemyBullets.forEachActive((bullet) => {
-    if (hit || !circlesTouch(bullet, world.player)) return;
-    world.enemyBullets.release(bullet);
-    hit = true;
+    if (hit) return;
+    if (circlesTouch(bullet, world.player)) {
+      world.enemyBullets.release(bullet);
+      hit = true;
+      return;
+    }
+    const distance = Math.hypot(bullet.x - world.player.x, bullet.y - world.player.y);
+    const hitDistance = bullet.radius + world.player.radius;
+    if (!bullet.grazed && distance > hitDistance && distance <= hitDistance + 8) {
+      bullet.grazed = true;
+      if (world.grazeEffectCooldownMs <= 0) {
+        events.push({ type: 'grazed', x: bullet.x, y: bullet.y });
+        world.grazeEffectCooldownMs = 100;
+      }
+    }
   });
   world.enemies.forEachActive((enemy) => {
     if (hit || !circlesTouch(enemy, world.player, 2)) return;
@@ -301,9 +336,18 @@ function resolveCombatCollisions(world, state, events) {
   });
   if (hit) {
     const result = takeDamage(state);
-    if (result === 'shielded') events.push({ type: 'shielded' });
-    if (result === 'damaged') events.push({ type: 'damaged' });
-    if (result === 'defeated') events.push({ type: 'defeated' });
+    if (result === 'shielded') {
+      spawnParticleBurst(world, world.player.x, world.player.y, '#74cbd8', 12);
+      events.push({ type: 'shielded' });
+    }
+    if (result === 'damaged') {
+      spawnParticleBurst(world, world.player.x, world.player.y, '#ef6f78', 8);
+      events.push({ type: 'damaged' });
+    }
+    if (result === 'defeated') {
+      spawnParticleBurst(world, world.player.x, world.player.y, '#ef6f78', 8);
+      events.push({ type: 'defeated' });
+    }
   }
 }
 
@@ -350,10 +394,16 @@ function updateShield(state, dtMs, events) {
 
 export function updateWorld({ world, state, input, dtMs }) {
   const events = [];
+  if (state.readyMs > 0) {
+    state.readyMs = Math.max(0, state.readyMs - dtMs);
+    updatePlayer(world, state, input, dtMs);
+    return events;
+  }
   state.remainingMs = Math.max(0, state.remainingMs - dtMs);
   state.elapsedMs += dtMs;
   state.invulnerableMs = Math.max(0, state.invulnerableMs - dtMs);
   world.shotSoundCooldownMs = Math.max(0, world.shotSoundCooldownMs - dtMs);
+  world.grazeEffectCooldownMs = Math.max(0, world.grazeEffectCooldownMs - dtMs);
   updateShield(state, dtMs, events);
   if (state.remainingMs <= 0) {
     events.push({ type: 'level-complete', levelId: state.levelId });
@@ -361,14 +411,19 @@ export function updateWorld({ world, state, input, dtMs }) {
   }
 
   updatePlayer(world, state, input, dtMs);
-  world.spawnCooldownMs -= dtMs;
-  if (world.spawnCooldownMs <= 0) {
-    spawnEnemy(world, state.levelId);
-    world.spawnCooldownMs = state.levelId === LEVELS.ONE ? 1_100 : 720;
+  const tutorialActive = state.levelId === LEVELS.ONE && state.elapsedMs < 8_000;
+  if (state.levelId === LEVELS.ONE) updateLevelOneTutorial(world, state);
+  if (!tutorialActive) {
+    world.spawnCooldownMs -= dtMs;
+    if (world.spawnCooldownMs <= 0) {
+      spawnEnemy(world, state.levelId);
+      world.spawnCooldownMs = state.levelId === LEVELS.ONE ? 1_100 : 720;
+    }
   }
   updateEnemies(world, state, dtMs);
-  if (state.levelId === LEVELS.ONE) updateLevelOnePatterns(world, dtMs);
-  else updateLevelTwoPatterns(world, state, dtMs);
+  if (state.levelId === LEVELS.ONE) {
+    if (!tutorialActive) updateLevelOnePatterns(world, dtMs);
+  } else updateLevelTwoPatterns(world, state, dtMs, events);
 
   if (world.player.fireCooldownMs <= 0) spawnPlayerVolley(world, state, events);
   updateProjectiles(world, dtMs);
