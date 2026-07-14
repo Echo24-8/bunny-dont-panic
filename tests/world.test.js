@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, startLevelTwo, startNewRun } from '../src/core/state.js';
 import { createWorld, updateWorld } from '../src/core/world.js';
+import { MAX_WEAPON_LEVEL, WEAPON_IDS } from '../src/core/weapons.js';
 
 const idleInput = { x: 0, y: 0 };
 
@@ -47,14 +48,216 @@ test('level two preparation freezes survival and suppresses hostile activity', (
   assert.ok(world.player.x > 180);
 });
 
+test('player cannot move behind the compact weapon HUD', () => {
+  const state = startNewRun(createInitialState());
+  const world = createWorld(() => 0.5);
+  world.player.y = 118;
+  updateWorld({ world, state, input: { x: 0, y: -1 }, dtMs: 100 });
+  assert.equal(world.player.y, 116);
+});
+
 function isolateLevelTwo(state, world) {
   state.readyMs = 0;
   world.spawnCooldownMs = Infinity;
   world.patternBand = 0;
   world.patternCooldownMs = Infinity;
   world.secondaryPatternCooldownMs = Infinity;
-  world.player.fireCooldownMs = Infinity;
+  if (world.weaponCooldownMs) {
+    for (const id of WEAPON_IDS) world.weaponCooldownMs[id] = Infinity;
+  }
+  if ('fireCooldownMs' in world.player) world.player.fireCooldownMs = Infinity;
 }
+
+function activeItems(collection) {
+  if (Array.isArray(collection)) return collection.filter((item) => item.active !== false);
+  return collection?.items?.filter((item) => item.active) ?? [];
+}
+
+function createWeaponScenario(id, level = 1) {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  state.build.weaponSlots = [{ id, level }, null, null];
+  const world = createWorld(() => 0.5);
+  isolateLevelTwo(state, world);
+  world.weaponCooldownMs[id] = 0;
+  return { state, world };
+}
+
+function spawnStationaryEnemy(world, values = {}) {
+  return world.enemies.acquire({
+    x: 180,
+    y: 220,
+    vx: 0,
+    vy: 0,
+    radius: 12,
+    speed: 0,
+    kind: 'puff',
+    hp: 20,
+    maxHp: 20,
+    shotCooldownMs: Infinity,
+    ...values
+  });
+}
+
+test('each weapon owns an independent cooldown key', () => {
+  const state = startNewRun(createInitialState());
+  const world = createWorld(() => 0.5);
+  assert.deepEqual(Object.keys(world.weaponCooldownMs).sort(), [...WEAPON_IDS].sort());
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  assert.ok(world.weaponCooldownMs.carrot > 0);
+  for (const id of WEAPON_IDS.filter((weaponId) => weaponId !== 'carrot')) {
+    assert.equal(world.weaponCooldownMs[id], 0);
+  }
+});
+
+test('all five weapons automatically create their distinct runtime output', () => {
+  const cases = [
+    ['carrot', 'projectile', 1],
+    ['dandelion', 'projectile', 3],
+    ['boomerang', 'projectile', 1],
+    ['bubble', 'orbital', 1],
+    ['lightning', 'effect', 1]
+  ];
+
+  for (const [id, output, expectedCount] of cases) {
+    const { state, world } = createWeaponScenario(id);
+    spawnStationaryEnemy(world);
+    updateWorld({ world, state, input: idleInput, dtMs: 1 });
+
+    const emitted = output === 'projectile'
+      ? activeItems(world.playerBullets).filter((item) => item.weaponId === id)
+      : output === 'orbital'
+        ? activeItems(world.orbitals).filter((item) => item.weaponId === id)
+        : activeItems(world.weaponEffects).filter((item) => item.weaponId === id);
+    assert.equal(emitted.length, expectedCount, `${id} should create ${expectedCount} ${output}(s)`);
+  }
+});
+
+test('projectile weapons automatically aim at the nearest enemy', () => {
+  const { state, world } = createWeaponScenario('carrot');
+  const nearest = spawnStationaryEnemy(world, { x: 220, y: 500 });
+  spawnStationaryEnemy(world, { x: 180, y: 120 });
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const bullet = activeItems(world.playerBullets).find((item) => item.weaponId === 'carrot');
+  const targetDx = nearest.x - world.player.x;
+  const targetDy = nearest.y - (world.player.y - 12);
+  const cross = bullet.vx * targetDy - bullet.vy * targetDx;
+  assert.ok(Math.abs(cross) < 0.001, `expected nearest-target aim, cross product was ${cross}`);
+  assert.ok(bullet.vx * targetDx + bullet.vy * targetDy > 0);
+});
+
+test('carrot projectiles keep steering toward moving enemies', () => {
+  const { state, world } = createWeaponScenario('carrot');
+  const enemy = spawnStationaryEnemy(world, { x: 180, y: 220 });
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const bullet = activeItems(world.playerBullets).find((item) => item.weaponId === 'carrot');
+  const initialVx = bullet.vx;
+
+  enemy.x = 300;
+  updateWorld({ world, state, input: idleInput, dtMs: 80 });
+  assert.ok(bullet.vx > initialVx + 1, `expected positive steering, got ${bullet.vx}`);
+});
+
+test('boomerang does not damage the same enemy on adjacent frames', () => {
+  const { state, world } = createWeaponScenario('boomerang');
+  const enemy = spawnStationaryEnemy(world, { x: 180, y: 485, radius: 10 });
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const hpAfterFirstHit = enemy.hp;
+  assert.ok(hpAfterFirstHit < enemy.maxHp);
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  assert.equal(enemy.hp, hpAfterFirstHit);
+});
+
+test('boomerang can hit a new enemy that reuses a released pool slot', () => {
+  const { state, world } = createWeaponScenario('boomerang');
+  const first = spawnStationaryEnemy(world, { x: 180, y: 485, radius: 10, entityId: 41 });
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const reusedPoolIndex = first.poolIndex;
+  world.enemies.release(first);
+  const replacement = spawnStationaryEnemy(world, { x: 180, y: 484, radius: 10, entityId: 42 });
+  assert.equal(replacement.poolIndex, reusedPoolIndex);
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  assert.ok(replacement.hp < replacement.maxHp);
+});
+
+test('bubble orbitals intercept enemy bullets before they can damage the player', () => {
+  const { state, world } = createWeaponScenario('bubble');
+  spawnStationaryEnemy(world);
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const orbital = activeItems(world.orbitals).find((item) => item.weaponId === 'bubble');
+  const hostile = world.enemyBullets.acquire({
+    x: orbital.x,
+    y: orbital.y,
+    vx: 0,
+    vy: 0,
+    radius: 4,
+    grazed: false
+  });
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  assert.equal(hostile.active, false);
+  assert.equal(state.health, state.maxHealth);
+  assert.equal(state.invulnerableMs, 0);
+});
+
+test('lightning chains through different enemies only', () => {
+  const { state, world } = createWeaponScenario('lightning', 3);
+  const enemies = [
+    spawnStationaryEnemy(world, { x: 90, y: 200 }),
+    spawnStationaryEnemy(world, { x: 180, y: 160 }),
+    spawnStationaryEnemy(world, { x: 270, y: 220 })
+  ];
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const effect = activeItems(world.weaponEffects).find((item) => item.weaponId === 'lightning');
+  const expectedPoints = new Set(enemies.map((enemy) => `${enemy.x},${enemy.y}`));
+  const targetPoints = effect.points.filter((point) => expectedPoints.has(`${point.x},${point.y}`));
+  assert.equal(targetPoints.length, enemies.length);
+  assert.equal(new Set(targetPoints.map((point) => `${point.x},${point.y}`)).size, targetPoints.length);
+});
+
+test('player bullet pool stays capped at 128 and records dropped bullets', () => {
+  const { state, world } = createWeaponScenario('dandelion', 3);
+  for (let index = 0; index < 128; index += 1) {
+    world.playerBullets.acquire({ x: 180, y: 300, vx: 0, vy: 0, radius: 4 });
+  }
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  assert.equal(world.playerBullets.activeCount, 128);
+  assert.ok(world.metrics.droppedPlayerBullets > 0);
+});
+
+test('reused player bullets reset weapon-specific fields', () => {
+  const { state, world } = createWeaponScenario('carrot');
+  const stale = world.playerBullets.acquire({
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    weaponId: 'boomerang',
+    mode: 'returning',
+    phase: 'returning',
+    lastHitPoolIndex: 42,
+    lastHitAgeMs: 123,
+    hitEnemyIndices: new Set([42])
+  });
+  const reusedPoolIndex = stale.poolIndex;
+  world.playerBullets.release(stale);
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+  const reused = activeItems(world.playerBullets).find((item) => item.poolIndex === reusedPoolIndex);
+  assert.equal(reused.weaponId, 'carrot');
+  assert.notEqual(reused.mode, 'returning');
+  assert.notEqual(reused.phase, 'returning');
+  assert.notEqual(reused.lastHitPoolIndex, 42);
+  assert.notEqual(reused.lastHitAgeMs, 123);
+  assert.equal(reused.hitEnemyIndices?.has?.(42) ?? reused.hitEnemyIndices?.includes?.(42) ?? false, false);
+});
 
 test('graze emits once and pooled enemy bullets reset their graze state', () => {
   const state = startNewRun(createInitialState());
@@ -163,7 +366,16 @@ test('standing still fails the authored opening within fifteen seconds', () => {
   };
 
   const baseSurvivalMs = simulate();
-  const maxBuildSurvivalMs = simulate({ rapidFire: 6, splitShot: 3, pierce: 3, moveSpeed: 6, shield: 5 });
+  const maxBuildSurvivalMs = simulate({
+    rapidFire: 6,
+    moveSpeed: 6,
+    shield: 5,
+    weaponSlots: [
+      { id: 'carrot', level: MAX_WEAPON_LEVEL },
+      { id: 'dandelion', level: MAX_WEAPON_LEVEL },
+      { id: 'boomerang', level: MAX_WEAPON_LEVEL }
+    ]
+  });
   assert.ok(baseSurvivalMs >= 5_000 && baseSurvivalMs <= 15_000, baseSurvivalMs);
   assert.ok(maxBuildSurvivalMs <= 15_000, maxBuildSurvivalMs);
 });

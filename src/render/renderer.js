@@ -1,6 +1,22 @@
 import { LEVELS, LOGICAL_HEIGHT, LOGICAL_WIDTH, PHASES } from '../core/constants.js';
 import { createResultSummary } from '../core/results.js';
 import { upgradeThreshold } from '../core/upgrades.js';
+import { WEAPON_DEFINITIONS } from '../core/weapons.js';
+
+const ART = Object.freeze({
+  paper: '#fff9e8',
+  sticker: '#fffdf7',
+  ink: '#344f5c',
+  inkMuted: '#58706b',
+  leaf: '#68bd7f',
+  sky: '#a9dce7',
+  coral: '#d94a56',
+  bullet: '#f04e5c',
+  gold: '#f2c451',
+  tape: '#f3d98b',
+  storm: '#647f91',
+  chestnut: '#9a6648'
+});
 
 export const UI_RECTS = Object.freeze({
   start: { x: 72, y: 438, width: 216, height: 58 },
@@ -13,8 +29,14 @@ export const UI_RECTS = Object.freeze({
   settingsClose: { x: 72, y: 448, width: 216, height: 54 }
 });
 
+export const WEAPON_SLOT_RECTS = Object.freeze([
+  { x: 84, y: 72, width: 80, height: 30 },
+  { x: 172, y: 72, width: 80, height: 30 },
+  { x: 260, y: 72, width: 80, height: 30 }
+]);
+
 export function getUpgradeCardRect(index) {
-  return { x: 32, y: 190 + index * 108, width: 296, height: 92 };
+  return { x: 24, y: 182 + index * 116, width: 312, height: 100 };
 }
 
 export function hitRect(point, rect) {
@@ -41,6 +63,23 @@ function fillRoundedRect(ctx, x, y, width, height, radius, fill, stroke = null, 
     ctx.lineWidth = lineWidth;
     ctx.stroke();
   }
+}
+
+function drawTape(ctx, x, y, width = 38, height = 12, rotation = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.fillStyle = 'rgba(243,217,139,.76)';
+  ctx.fillRect(-width / 2, -height / 2, width, height);
+  ctx.strokeStyle = 'rgba(154,102,72,.2)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-width / 2, -height / 2, width, height);
+  ctx.restore();
+}
+
+function drawPaperPanel(ctx, x, y, width, height, { fill = ART.paper, stroke = ART.ink, shadow = '#c8b879' } = {}) {
+  fillRoundedRect(ctx, x + 3, y + 4, width, height, 7, shadow);
+  fillRoundedRect(ctx, x, y, width, height, 7, fill, stroke, 2);
 }
 
 function drawHeart(ctx, x, y, size, filled = true) {
@@ -80,8 +119,104 @@ function drawStar(ctx, x, y, outerRadius, color = '#f2ca63') {
   ctx.restore();
 }
 
+function drawWeaponIcon(ctx, id, x, y, size, sticker = true) {
+  ctx.save();
+  ctx.translate(x, y);
+  const scale = size / 36;
+  ctx.scale(scale, scale);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (sticker) {
+    ctx.fillStyle = '#fffdf7';
+    ctx.strokeStyle = 'rgba(52,79,92,.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.strokeStyle = ART.ink;
+  ctx.lineWidth = 2;
+  if (id === 'carrot') {
+    ctx.save();
+    ctx.rotate(-0.55);
+    ctx.fillStyle = '#ed7c42';
+    ctx.beginPath();
+    ctx.ellipse(0, 3, 6, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = ART.leaf;
+    for (const angle of [-0.55, 0, 0.55]) {
+      ctx.save();
+      ctx.translate(0, -8);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.ellipse(0, -4, 2.8, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  } else if (id === 'dandelion') {
+    ctx.fillStyle = ART.gold;
+    ctx.beginPath();
+    ctx.arc(-4, 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    for (const [dx, dy] of [[-10, -8], [0, -12], [10, -7], [12, 3]]) {
+      ctx.beginPath();
+      ctx.moveTo(-2, 2);
+      ctx.lineTo(dx, dy);
+      ctx.stroke();
+      ctx.fillStyle = '#fffdf7';
+      ctx.beginPath();
+      ctx.ellipse(dx, dy, 2.2, 4, Math.atan2(dy, dx), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (id === 'boomerang') {
+    drawStar(ctx, 0, 0, 13, ART.gold);
+    ctx.fillStyle = '#4d7f91';
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (id === 'bubble') {
+    for (const [dx, dy, radius] of [[-5, 3, 8], [6, -4, 6], [8, 7, 4]]) {
+      ctx.fillStyle = 'rgba(230,168,74,.62)';
+      ctx.beginPath();
+      ctx.arc(dx, dy, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#4f93a6';
+      ctx.stroke();
+    }
+  } else if (id === 'lightning') {
+    ctx.fillStyle = ART.sky;
+    ctx.beginPath();
+    ctx.arc(-7, -3, 7, Math.PI * .8, Math.PI * 2.1);
+    ctx.arc(1, -7, 8, Math.PI, Math.PI * 2);
+    ctx.arc(8, -2, 6, Math.PI * 1.35, Math.PI * 2.35);
+    ctx.lineTo(-10, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = ART.gold;
+    ctx.beginPath();
+    ctx.moveTo(2, 0);
+    ctx.lineTo(-3, 9);
+    ctx.lineTo(2, 8);
+    ctx.lineTo(-1, 16);
+    ctx.lineTo(9, 5);
+    ctx.lineTo(4, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawGearButton(ctx, rect) {
-  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 8, 'rgba(250,253,247,.84)', 'rgba(38,62,67,.24)', 1);
+  fillRoundedRect(ctx, rect.x + 2, rect.y + 3, rect.width, rect.height, 7, 'rgba(52,79,92,.18)');
+  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 7, 'rgba(255,253,247,.94)', ART.ink, 2);
   ctx.save();
   ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
   ctx.strokeStyle = '#31565c';
@@ -103,10 +238,14 @@ function drawGearButton(ctx, rect) {
 
 function drawButton(ctx, rect, label, variant = 'primary') {
   const palette = variant === 'primary'
-    ? { fill: '#e75560', stroke: '#873942', text: '#fffaf2', shadow: '#ad3e49' }
-    : { fill: '#f9f4df', stroke: '#526c67', text: '#29474c', shadow: '#d0c79e' };
-  fillRoundedRect(ctx, rect.x, rect.y + 4, rect.width, rect.height, 8, palette.shadow);
-  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 8, palette.fill, palette.stroke, 2);
+    ? { fill: ART.coral, stroke: ART.ink, text: '#fffdf7', shadow: '#a73f49' }
+    : { fill: ART.paper, stroke: ART.ink, text: ART.ink, shadow: '#c8b879' };
+  fillRoundedRect(ctx, rect.x + 2, rect.y + 4, rect.width, rect.height, 7, palette.shadow);
+  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 7, palette.fill, '#fffdf7', 5);
+  roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 7);
+  ctx.strokeStyle = palette.stroke;
+  ctx.lineWidth = 2;
+  ctx.stroke();
   ctx.fillStyle = palette.text;
   ctx.font = '700 20px "Microsoft YaHei UI", sans-serif';
   ctx.textAlign = 'center';
@@ -127,21 +266,29 @@ export function drawBootScreen(canvas, dpr, mode = 'loading', detail = '') {
   ensureResolution(canvas, dpr);
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#d8edf0';
+  ctx.fillStyle = '#fff3c7';
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  ctx.fillStyle = '#8bb99c';
+  ctx.strokeStyle = 'rgba(92,139,158,.12)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= LOGICAL_WIDTH; x += 24) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, LOGICAL_HEIGHT); ctx.stroke();
+  }
+  for (let y = 0; y <= LOGICAL_HEIGHT; y += 24) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(LOGICAL_WIDTH, y); ctx.stroke();
+  }
+  ctx.fillStyle = '#79c99e';
   ctx.beginPath();
   ctx.arc(70, 590, 190, Math.PI, Math.PI * 2);
   ctx.arc(310, 610, 170, Math.PI, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#29474c';
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.font = '800 38px "Microsoft YaHei UI", sans-serif';
   ctx.fillText('兔兔别慌', 180, 190);
   ctx.font = '600 16px "Microsoft YaHei UI", sans-serif';
   if (mode === 'loading') {
     ctx.fillText('正在准备童话世界…', 180, 244);
-    ctx.strokeStyle = '#e75560';
+    ctx.strokeStyle = ART.coral;
     ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.arc(180, 292, 18, -Math.PI / 2, Math.PI * 0.8);
@@ -162,41 +309,34 @@ function drawBackground(ctx, assets, levelId) {
     ctx.fillStyle = levelId === LEVELS.TWO ? '#7a9e99' : '#c8e4e1';
     ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
   }
-  ctx.fillStyle = 'rgba(255,255,255,.08)';
-  for (let index = 0; index < 26; index += 1) {
-    const x = (index * 83) % LOGICAL_WIDTH;
-    const y = (index * 137) % LOGICAL_HEIGHT;
-    ctx.fillRect(x, y, 2, 2);
-  }
 }
 
 function drawMenu(ctx, assets, now, reducedMotion) {
   drawBackground(ctx, assets, LEVELS.ONE);
-  ctx.fillStyle = 'rgba(246,250,238,.84)';
-  ctx.beginPath();
-  ctx.ellipse(180, 98, 146, 72, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#29474c';
+  drawPaperPanel(ctx, 34, 40, 292, 116, { fill: 'rgba(255,249,232,.94)' });
+  drawTape(ctx, 82, 43, 52, 13, -0.13);
+  drawTape(ctx, 280, 44, 52, 13, 0.12);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = '900 42px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('兔兔别慌', 180, 88);
-  ctx.fillStyle = '#526c67';
+  ctx.fillText('兔兔别慌', 180, 87);
+  ctx.fillStyle = ART.inkMuted;
   ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('两关。真的只有两关。', 180, 128);
+  ctx.fillText('两关。第二关真的不慌。', 180, 129);
 
   const bob = reducedMotion ? 0 : Math.sin(now / 420) * 5;
-  if (assets.bunny) ctx.drawImage(assets.bunny, 98, 186 + bob, 164, 164);
+  if (assets.bunny) ctx.drawImage(assets.bunny, 91, 176 + bob, 178, 178);
   drawButton(ctx, UI_RECTS.start, '开始冒险');
   drawGearButton(ctx, UI_RECTS.settings);
-  ctx.fillStyle = 'rgba(38,62,67,.72)';
+  ctx.fillStyle = 'rgba(52,79,92,.72)';
 }
 
 function drawEnemy(ctx, image, enemy) {
   const size = enemy.radius * 2.7;
   ctx.save();
   ctx.translate(enemy.x, enemy.y);
-  ctx.rotate(enemy.rotation * 0.22);
+  ctx.rotate(Math.sin(enemy.ageMs / 260 + enemy.poolIndex) * 0.08);
   if (image) ctx.drawImage(image, -size / 2, -size / 2, size, size);
   else {
     ctx.fillStyle = enemy.kind === 'star' ? '#f2ca63' : enemy.kind === 'bell' ? '#6d9fc0' : '#e89a82';
@@ -238,11 +378,15 @@ function drawJoystickBase(ctx, joystick) {
   const center = joystick.center;
   const knobX = center.x + joystick.vector.x * 28;
   const knobY = center.y + joystick.vector.y * 28;
-  ctx.fillStyle = 'rgba(38,62,67,.14)';
+  ctx.fillStyle = 'rgba(255,253,247,.28)';
   ctx.beginPath();
   ctx.arc(center.x, center.y, 43, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = 'rgba(250,253,247,.52)';
+  ctx.fillStyle = 'rgba(52,79,92,.12)';
+  ctx.beginPath();
+  ctx.arc(center.x + 2, center.y + 3, 43, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,253,247,.82)';
   ctx.beginPath();
   ctx.arc(knobX, knobY, 18, 0, Math.PI * 2);
   ctx.fill();
@@ -257,23 +401,88 @@ function drawPickupsEnemiesAndPlayerBullets(ctx, assets, world, now, reducedMoti
   world.playerBullets.forEachActive((bullet) => {
     ctx.save();
     ctx.translate(bullet.x, bullet.y);
-    ctx.rotate(bullet.rotation + Math.PI / 2);
-    ctx.fillStyle = '#ed7c42';
-    ctx.strokeStyle = '#8a4a2d';
-    ctx.lineWidth = 1.2;
+    if (bullet.weaponId === 'dandelion') {
+      ctx.rotate(bullet.rotation + Math.PI / 2);
+      ctx.fillStyle = '#fffdf7';
+      ctx.strokeStyle = '#9a8050';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 2.3, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = ART.gold;
+      ctx.beginPath();
+      ctx.arc(0, 4, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (bullet.weaponId === 'boomerang') {
+      ctx.rotate(bullet.rotation);
+      drawStar(ctx, 0, 0, 8, ART.gold);
+      ctx.fillStyle = '#4d7f91';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.rotate(bullet.rotation + Math.PI / 2);
+      ctx.fillStyle = '#ed7c42';
+      ctx.strokeStyle = '#8a4a2d';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 3.5, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = ART.leaf;
+      ctx.fillRect(-2, -9, 4, 4);
+    }
+    ctx.restore();
+  });
+  world.orbitals.forEachActive((orbital) => {
+    ctx.save();
+    ctx.globalAlpha = orbital.ready ? 1 : 0.28;
+    ctx.fillStyle = 'rgba(230,168,74,.58)';
+    ctx.strokeStyle = '#fffdf7';
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 3.5, 7, 0, 0, Math.PI * 2);
+    ctx.arc(orbital.x, orbital.y, orbital.radius + 1, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#5d9d70';
-    ctx.fillRect(-2, -9, 4, 4);
+    ctx.strokeStyle = '#4f93a6';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.beginPath();
+    ctx.arc(orbital.x - 2.5, orbital.y - 2.5, 2, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   });
 }
 
+function drawWeaponEffects(ctx, effects) {
+  effects.forEachActive((effect) => {
+    if (effect.weaponId !== 'lightning' || effect.points.length < 2) return;
+    const alpha = Math.max(0, Math.min(1, effect.lifeMs / 230));
+    ctx.strokeStyle = `rgba(255,253,247,${alpha})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    effect.points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else {
+        const previous = effect.points[index - 1];
+        const midX = (previous.x + point.x) / 2 + (index % 2 ? 5 : -5);
+        const midY = (previous.y + point.y) / 2;
+        ctx.lineTo(midX, midY);
+        ctx.lineTo(point.x, point.y);
+      }
+    });
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(242,196,81,${alpha})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+}
+
 function drawEnemyBulletsBatched(ctx, bullets) {
-  ctx.fillStyle = '#e64f5c';
-  ctx.strokeStyle = '#fff7e8';
+  ctx.fillStyle = ART.bullet;
+  ctx.strokeStyle = '#fffdf7';
   ctx.lineWidth = 2;
   ctx.beginPath();
   bullets.forEachActive((bullet) => {
@@ -298,7 +507,7 @@ function drawPlayerAndShield(ctx, assets, player, state, now, reducedMotion) {
     }
   }
   if (state.shieldReady) {
-    ctx.strokeStyle = 'rgba(111,190,204,.9)';
+    ctx.strokeStyle = 'rgba(131,191,209,.95)';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(player.x, player.y, 27, 0, Math.PI * 2);
@@ -335,8 +544,8 @@ function drawJoystickOutline(ctx, joystick) {
   const center = joystick.center;
   const knobX = center.x + joystick.vector.x * 28;
   const knobY = center.y + joystick.vector.y * 28;
-  ctx.strokeStyle = 'rgba(255,255,255,.72)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(52,79,92,.68)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(center.x, center.y, 43, 0, Math.PI * 2);
   ctx.moveTo(knobX + 18, knobY);
@@ -350,6 +559,7 @@ function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
   drawPatternWarning(ctx, world.patternWarning, now, reducedMotion);
   drawJoystickBase(ctx, joystick);
   drawPickupsEnemiesAndPlayerBullets(ctx, assets, world, now, reducedMotion);
+  drawWeaponEffects(ctx, world.weaponEffects);
   drawEnemyBulletsBatched(ctx, world.enemyBullets);
   drawPlayerAndShield(ctx, assets, world.player, state, now, reducedMotion);
   drawParticles(ctx, world.particles, reducedMotion);
@@ -358,40 +568,67 @@ function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
   drawJoystickOutline(ctx, joystick);
 }
 
+function drawWeaponSlot(ctx, rect, slot) {
+  ctx.save();
+  if (!slot) {
+    fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 6, 'rgba(255,253,247,.5)');
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = 'rgba(52,79,92,.48)';
+    ctx.lineWidth = 1.5;
+    roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 6);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(52,79,92,.56)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 12px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText('空槽', rect.x + rect.width / 2, rect.y + rect.height / 2 + 1);
+    ctx.restore();
+    return;
+  }
+  fillRoundedRect(ctx, rect.x + 2, rect.y + 2, rect.width, rect.height, 6, 'rgba(52,79,92,.15)');
+  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 6, 'rgba(255,253,247,.9)', '#fffdf7', 3);
+  roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 6);
+  ctx.strokeStyle = ART.ink;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  drawWeaponIcon(ctx, slot.id, rect.x + 17, rect.y + 15, 22, false);
+  ctx.fillStyle = ART.ink;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '800 12px ui-monospace, monospace';
+  ctx.fillText(`Lv.${slot.level}`, rect.x + 32, rect.y + 16);
+  ctx.restore();
+}
+
 function drawHud(ctx, state, now, reducedMotion) {
   const criticalHealth = state.health === 1;
-  fillRoundedRect(
-    ctx,
-    10,
-    12,
-    118,
-    44,
-    8,
-    'rgba(250,253,247,.84)',
-    criticalHealth ? '#e75560' : 'rgba(38,62,67,.18)',
-    criticalHealth ? 2.5 : 1
-  );
-  for (let index = 0; index < state.maxHealth; index += 1) drawHeart(ctx, 31 + index * 33, 23, 14, index < state.health);
-  fillRoundedRect(ctx, 138, 12, 96, 44, 8, 'rgba(250,253,247,.9)', 'rgba(38,62,67,.18)');
-  ctx.fillStyle = '#29474c';
+  fillRoundedRect(ctx, 10, 13, 112, 42, 7, 'rgba(52,79,92,.16)');
+  fillRoundedRect(ctx, 10, 10, 112, 42, 7, 'rgba(255,253,247,.92)', criticalHealth ? ART.coral : ART.ink, criticalHealth ? 2.5 : 1.5);
+  for (let index = 0; index < state.maxHealth; index += 1) drawHeart(ctx, 28 + index * 34, 19, 14, index < state.health);
+  fillRoundedRect(ctx, 138, 13, 88, 42, 7, 'rgba(52,79,92,.16)');
+  fillRoundedRect(ctx, 136, 10, 88, 42, 7, 'rgba(255,253,247,.94)', ART.ink, 1.5);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = '800 22px ui-monospace, "Cascadia Mono", monospace';
-  ctx.fillText(String(Math.ceil(state.remainingMs / 1000)).padStart(2, '0'), 186, 34);
+  ctx.fillText(String(Math.ceil(state.remainingMs / 1000)).padStart(2, '0'), 180, 31);
   drawGearButton(ctx, UI_RECTS.settings);
 
   const threshold = upgradeThreshold(state.upgradeCount);
   const progress = Math.max(0, Math.min(1, state.xp / threshold));
-  fillRoundedRect(ctx, 104, 64, 152, 10, 5, 'rgba(34,65,66,.28)');
-  if (progress > 0) fillRoundedRect(ctx, 104, 64, 152 * progress, 10, 5, '#f2ca63');
-  ctx.fillStyle = 'rgba(255,255,255,.9)';
-  ctx.font = '700 11px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText(`第 ${state.levelId} 关`, 180, 88);
+  fillRoundedRect(ctx, 88, 59, 184, 9, 4.5, 'rgba(52,79,92,.28)', '#fffdf7', 1.5);
+  if (progress > 0) fillRoundedRect(ctx, 88, 59, 184 * progress, 9, 4.5, ART.gold);
+  fillRoundedRect(ctx, 10, 72, 64, 30, 6, 'rgba(255,253,247,.9)', ART.ink, 1.5);
+  ctx.fillStyle = ART.ink;
+  ctx.font = '800 12px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(`第 ${state.levelId} 关`, 42, 87);
+  WEAPON_SLOT_RECTS.forEach((rect, index) => drawWeaponSlot(ctx, rect, state.build.weaponSlots[index]));
 
   if (state.readyMs > 0) {
     const alpha = reducedMotion ? 1 : 0.84 + Math.sin(now / 100) * 0.12;
-    fillRoundedRect(ctx, 120, 278, 120, 52, 8, `rgba(250,253,247,${alpha})`, '#526c67', 2);
-    ctx.fillStyle = '#29474c';
+    fillRoundedRect(ctx, 120, 278, 120, 52, 7, `rgba(255,253,247,${alpha})`, ART.ink, 2);
+    drawTape(ctx, 180, 277, 42, 11, -0.04);
+    ctx.fillStyle = ART.ink;
     ctx.font = '900 22px "Microsoft YaHei UI", sans-serif';
     ctx.fillText('准备', 180, 304);
   }
@@ -404,10 +641,14 @@ function drawHud(ctx, state, now, reducedMotion) {
 }
 
 function drawUpgradeIcon(ctx, id, x, y) {
+  if (WEAPON_DEFINITIONS.some((definition) => definition.id === id)) {
+    drawWeaponIcon(ctx, id, x, y, 46);
+    return;
+  }
   ctx.save();
   ctx.translate(x, y);
-  ctx.strokeStyle = '#31565c';
-  ctx.fillStyle = id === 'heart' ? '#df4c5a' : id === 'shield' ? '#74b9c6' : '#f2ca63';
+  ctx.strokeStyle = ART.ink;
+  ctx.fillStyle = id === 'heart' ? ART.coral : id === 'shield' ? ART.sky : ART.gold;
   ctx.lineWidth = 2;
   if (id === 'shield') {
     ctx.beginPath();
@@ -422,6 +663,15 @@ function drawUpgradeIcon(ctx, id, x, y) {
     drawHeart(ctx, 0, -8, 17, true);
     ctx.restore();
     return;
+  } else if (id === 'moveSpeed') {
+    ctx.beginPath();
+    ctx.moveTo(-13, 6);
+    ctx.lineTo(-2, -9);
+    ctx.lineTo(5, 2);
+    ctx.lineTo(14, 7);
+    ctx.lineTo(8, 13);
+    ctx.lineTo(-10, 12);
+    ctx.closePath();
   } else {
     ctx.beginPath();
     ctx.arc(0, 0, 13, 0, Math.PI * 2);
@@ -432,37 +682,47 @@ function drawUpgradeIcon(ctx, id, x, y) {
 }
 
 function drawUpgradeOverlay(ctx, choices) {
-  ctx.fillStyle = 'rgba(25,43,46,.58)';
+  ctx.fillStyle = 'rgba(35,58,64,.62)';
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  ctx.fillStyle = '#fffaf0';
+  ctx.fillStyle = ART.paper;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = '900 28px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('选一个，别想太久', 180, 126);
+  ctx.fillText('挑一张贴纸', 180, 118);
   ctx.font = '600 12px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('战斗已暂停', 180, 156);
+  ctx.fillText('战斗暂停中', 180, 148);
+  drawTape(ctx, 126, 91, 48, 13, -0.12);
+  drawTape(ctx, 234, 91, 48, 13, 0.11);
 
   choices.forEach((choice, index) => {
     const rect = getUpgradeCardRect(index);
-    fillRoundedRect(ctx, rect.x, rect.y + 3, rect.width, rect.height, 8, '#b9ad85');
-    fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 8, '#fffaf0', '#5a706d', 2);
-    drawUpgradeIcon(ctx, choice.id, rect.x + 48, rect.y + 46);
+    drawPaperPanel(ctx, rect.x, rect.y, rect.width, rect.height);
+    drawUpgradeIcon(ctx, choice.id, rect.x + 49, rect.y + 53);
+    const categoryLabel = choice.category === 'weapon'
+      ? (choice.preview?.levelText === '解锁' ? '新武器' : '武器升级')
+      : choice.category === 'consumable' ? '立即生效' : '辅助能力';
+    const categoryFill = choice.category === 'weapon' ? '#d8eef1' : choice.category === 'consumable' ? '#f7d2d0' : '#f7e8a9';
+    fillRoundedRect(ctx, rect.x + 80, rect.y + 10, 64, 22, 5, categoryFill, 'rgba(52,79,92,.24)', 1);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = ART.ink;
+    ctx.font = '800 12px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText(categoryLabel, rect.x + 112, rect.y + 21);
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#29474c';
+    ctx.fillStyle = ART.ink;
     ctx.font = '800 18px "Microsoft YaHei UI", sans-serif';
-    ctx.fillText(choice.title, rect.x + 82, rect.y + 34, 132);
+    ctx.fillText(choice.title, rect.x + 82, rect.y + 48, 148);
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#9b6c3e';
-    ctx.font = '800 11px ui-monospace, monospace';
-    ctx.fillText(choice.preview?.levelText ?? '', rect.x + rect.width - 18, rect.y + 35, 74);
+    ctx.fillStyle = ART.chestnut;
+    ctx.font = '800 12px ui-monospace, monospace';
+    ctx.fillText(choice.preview?.levelText ?? '', rect.x + rect.width - 16, rect.y + 48, 78);
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#5b706e';
+    ctx.fillStyle = ART.inkMuted;
     ctx.font = '500 13px "Microsoft YaHei UI", sans-serif';
-    ctx.fillText(choice.preview?.valueText ?? choice.description, rect.x + 82, rect.y + 61, rect.width - 104);
+    ctx.fillText(choice.preview?.valueText ?? choice.description, rect.x + 82, rect.y + 74, rect.width - 102);
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#9b6c3e';
+    ctx.fillStyle = ART.chestnut;
     ctx.font = '800 10px ui-monospace, monospace';
-    ctx.fillText(String(index + 1), rect.x + rect.width - 18, rect.y + 18);
+    ctx.fillText(String(index + 1), rect.x + rect.width - 14, rect.y + 18);
   });
 }
 
@@ -470,14 +730,17 @@ function drawTransition(ctx, assets, state) {
   drawBackground(ctx, assets, LEVELS.TWO);
   ctx.fillStyle = 'rgba(24,42,45,.58)';
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  ctx.fillStyle = '#fffaf0';
+  drawPaperPanel(ctx, 54, 232, 252, 126, { fill: 'rgba(255,249,232,.95)' });
+  drawTape(ctx, 90, 237, 46, 12, -0.1);
+  drawTape(ctx, 270, 237, 46, 12, 0.1);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = '900 26px "Microsoft YaHei UI", sans-serif';
   ctx.fillText('第 2 关', 180, 270);
   ctx.font = '700 18px "Microsoft YaHei UI", sans-serif';
   ctx.fillText('难度略有提升', 180, 310);
-  ctx.fillStyle = '#f2ca63';
+  ctx.fillStyle = ART.gold;
   ctx.fillRect(94, 350, Math.max(0, 172 * (1 - state.transitionMs / 1200)), 5);
 }
 
@@ -494,24 +757,21 @@ function shareStatusLabel(status) {
 
 function drawResult(ctx, assets, state, shareStatus) {
   drawBackground(ctx, assets, LEVELS.TWO);
-  ctx.fillStyle = 'rgba(246,250,238,.9)';
-  roundedRectPath(ctx, 28, 88, 304, 472, 8);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(38,62,67,.28)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  drawPaperPanel(ctx, 28, 88, 304, 472, { fill: 'rgba(255,249,232,.94)' });
+  drawTape(ctx, 78, 91, 54, 13, -0.12);
+  drawTape(ctx, 282, 92, 54, 13, 0.11);
   const success = state.result?.kind === 'success';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#29474c';
+  ctx.fillStyle = ART.ink;
   ctx.font = '900 30px "Microsoft YaHei UI", sans-serif';
   ctx.fillText(success ? '你居然撑住了' : '兔兔尽力了', 180, 142);
-  ctx.fillStyle = success ? '#4f8c69' : '#c64552';
+  ctx.fillStyle = success ? '#3e8562' : ART.coral;
   ctx.font = '900 48px ui-monospace, "Cascadia Mono", monospace';
   const summary = createResultSummary(state);
   const seconds = (summary.survivalMs / 1000).toFixed(1);
   ctx.fillText(`${seconds}s`, 180, 213);
-  ctx.fillStyle = '#5b706e';
+  ctx.fillStyle = ART.inkMuted;
   ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
   ctx.fillText(success ? '第二关完成' : '本次存活时间', 180, 255);
 
@@ -523,7 +783,7 @@ function drawResult(ctx, assets, state, shareStatus) {
     attemptLine,
     summary.buildSummary
   ];
-  ctx.fillStyle = '#455f61';
+  ctx.fillStyle = ART.ink;
   ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
   statisticLines.forEach((line, index) => ctx.fillText(line, 180, 305 + index * 26, 260));
   ctx.fillStyle = '#8a4a50';
@@ -536,14 +796,15 @@ function drawResult(ctx, assets, state, shareStatus) {
 }
 
 function drawToggle(ctx, rect, label, enabled) {
-  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 8, '#fffaf0', '#607671', 1.5);
-  ctx.fillStyle = '#29474c';
+  fillRoundedRect(ctx, rect.x + 2, rect.y + 3, rect.width, rect.height, 7, '#c8b879');
+  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 7, ART.sticker, ART.ink, 1.5);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'left';
   ctx.font = '800 17px "Microsoft YaHei UI", sans-serif';
   ctx.fillText(label, rect.x + 22, rect.y + rect.height / 2);
   const trackX = rect.x + rect.width - 70;
   const trackY = rect.y + 17;
-  fillRoundedRect(ctx, trackX, trackY, 48, 30, 15, enabled ? '#4f9471' : '#aab4ae');
+  fillRoundedRect(ctx, trackX, trackY, 48, 30, 15, enabled ? ART.leaf : '#aab4ae');
   ctx.fillStyle = '#fff';
   ctx.beginPath();
   ctx.arc(trackX + (enabled ? 33 : 15), trackY + 15, 11, 0, Math.PI * 2);
@@ -553,8 +814,10 @@ function drawToggle(ctx, rect, label, enabled) {
 function drawSettings(ctx, settings) {
   ctx.fillStyle = 'rgba(25,43,46,.64)';
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  fillRoundedRect(ctx, 28, 152, 304, 374, 8, '#f3ead0', '#4d6763', 2);
-  ctx.fillStyle = '#29474c';
+  drawPaperPanel(ctx, 28, 152, 304, 374);
+  drawTape(ctx, 82, 156, 52, 13, -0.12);
+  drawTape(ctx, 278, 156, 52, 13, 0.12);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.font = '900 27px "Microsoft YaHei UI", sans-serif';
   ctx.fillText('声音设置', 180, 210);
@@ -566,8 +829,9 @@ function drawSettings(ctx, settings) {
 function drawPaused(ctx) {
   ctx.fillStyle = 'rgba(25,43,46,.52)';
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  fillRoundedRect(ctx, 92, 270, 176, 88, 8, '#fffaf0', '#58706b', 2);
-  ctx.fillStyle = '#29474c';
+  drawPaperPanel(ctx, 92, 270, 176, 88);
+  drawTape(ctx, 180, 272, 48, 12, -0.05);
+  ctx.fillStyle = ART.ink;
   ctx.textAlign = 'center';
   ctx.font = '900 24px "Microsoft YaHei UI", sans-serif';
   ctx.fillText('已暂停', 180, 315);

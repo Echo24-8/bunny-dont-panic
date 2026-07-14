@@ -1,10 +1,10 @@
 export const IMAGE_MANIFEST = Object.freeze({
-  background1: './assets/images/meadow-day.png',
-  background2: './assets/images/meadow-storm.png',
-  bunny: './assets/images/bunny.png',
-  puff: './assets/images/enemy-puff.png',
-  bell: './assets/images/enemy-bell.png',
-  star: './assets/images/enemy-star.png'
+  background1: './assets/images/notebook-forest-day.png',
+  background2: './assets/images/notebook-forest-storm.png',
+  bunny: './assets/images/bunny-sticker.png',
+  puff: './assets/images/enemy-cloud-bear.png',
+  bell: './assets/images/enemy-acorn-mouse.png',
+  star: './assets/images/enemy-star-chick.png'
 });
 
 export const AUDIO_MANIFEST = Object.freeze({
@@ -35,4 +35,3 @@ export async function loadImageAssets(manifest = IMAGE_MANIFEST) {
   if (failures.length > 0) throw new Error(`无法加载素材：${failures.join(', ')}`);
   return assets;
 }
-

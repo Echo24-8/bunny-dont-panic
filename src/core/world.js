@@ -10,6 +10,7 @@ import {
 } from './patterns.js';
 import { takeDamage } from './state.js';
 import { derivePlayerStats, upgradeThreshold } from './upgrades.js';
+import { WEAPON_IDS, deriveWeaponStats } from './weapons.js';
 
 const BULLET_MARGIN = 36;
 
@@ -22,8 +23,23 @@ export function createWorld(rng = Math.random) {
     rng,
     player: { x: 180, y: 510, radius: 7, fireCooldownMs: 0 },
     enemies: new ObjectPool(POOL_LIMITS.ENEMIES, () => ({ ...entityFactory(), hp: 1, maxHp: 1, kind: 'puff', shotCooldownMs: 0, xpValue: 2 })),
-    playerBullets: new ObjectPool(POOL_LIMITS.PLAYER_BULLETS, () => ({ ...entityFactory(), pierceLeft: 0, damage: 1 })),
+    playerBullets: new ObjectPool(POOL_LIMITS.PLAYER_BULLETS, () => ({
+      ...entityFactory(),
+      weaponId: 'carrot',
+      mode: 'linear',
+      phase: 'outbound',
+      pierceLeft: 0,
+      damage: 1,
+      maxAgeMs: 2_200,
+      returnAfterMs: Infinity,
+      maxTargets: 1,
+      lastHitPoolIndex: -1,
+      lastHitAgeMs: -Infinity,
+      hitEnemyIndices: new Set()
+    })),
     enemyBullets: new ObjectPool(POOL_LIMITS.ENEMY_BULLETS, () => ({ ...entityFactory(), grazed: false })),
+    orbitals: new ObjectPool(POOL_LIMITS.ORBITALS, () => ({ ...entityFactory(), weaponId: 'bubble', slotIndex: 0, damage: 1, ready: true })),
+    weaponEffects: new ObjectPool(POOL_LIMITS.WEAPON_EFFECTS, () => ({ weaponId: 'lightning', points: [], lifeMs: 0, ageMs: 0 })),
     pickups: new ObjectPool(POOL_LIMITS.PICKUPS, () => ({ ...entityFactory(), value: 2 })),
     particles: new ObjectPool(POOL_LIMITS.PARTICLES, () => ({ ...entityFactory(), lifeMs: 0, color: '#ffffff', size: 2, kind: 'combat' })),
     spawnCooldownMs: 0,
@@ -38,7 +54,9 @@ export function createWorld(rng = Math.random) {
     tutorialEnemySpawned: false,
     tutorialBulletFired: false,
     shotSoundCooldownMs: 0,
-    metrics: { droppedEnemyBullets: 0 }
+    weaponCooldownMs: Object.fromEntries(WEAPON_IDS.map((id) => [id, 0])),
+    nextEnemyId: 1,
+    metrics: { droppedEnemyBullets: 0, droppedPlayerBullets: 0 }
   };
 }
 
@@ -46,6 +64,8 @@ export function resetWorld(world) {
   world.enemies.clear();
   world.playerBullets.clear();
   world.enemyBullets.clear();
+  world.orbitals.clear();
+  world.weaponEffects.clear();
   world.pickups.clear();
   world.particles.clear();
   Object.assign(world.player, { x: 180, y: 510, fireCooldownMs: 0 });
@@ -61,7 +81,10 @@ export function resetWorld(world) {
   world.tutorialEnemySpawned = false;
   world.tutorialBulletFired = false;
   world.shotSoundCooldownMs = 0;
+  for (const id of WEAPON_IDS) world.weaponCooldownMs[id] = 0;
+  world.nextEnemyId = 1;
   world.metrics.droppedEnemyBullets = 0;
+  world.metrics.droppedPlayerBullets = 0;
 }
 
 function acquireEnemyBullet(world, specification) {
@@ -104,7 +127,8 @@ function spawnEnemy(world, levelId) {
     radius: definition.radius,
     speed: definition.speed,
     xpValue: definition.xpValue,
-    shotCooldownMs: 900 + world.rng() * 900
+    shotCooldownMs: 900 + world.rng() * 900,
+    entityId: world.nextEnemyId++
   });
 }
 
@@ -130,32 +154,198 @@ function spawnPickup(world, enemy) {
   world.pickups.acquire({ x: enemy.x, y: enemy.y, vx: 0, vy: 0, radius: 6, value: enemy.xpValue, ageMs: 0 });
 }
 
-function spawnPlayerVolley(world, state, events) {
+function acquirePlayerProjectile(world, specification) {
+  const projectile = world.playerBullets.acquire({
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    radius: 4,
+    rotation: 0,
+    ageMs: 0,
+    weaponId: 'carrot',
+    mode: 'linear',
+    phase: 'outbound',
+    damage: 1,
+    pierceLeft: 0,
+    maxAgeMs: 2_200,
+    returnAfterMs: Infinity,
+    maxTargets: 1,
+    lastHitPoolIndex: -1,
+    lastHitAgeMs: -Infinity,
+    ...specification
+  });
+  if (!projectile) {
+    world.metrics.droppedPlayerBullets += 1;
+    return null;
+  }
+  if (!(projectile.hitEnemyIndices instanceof Set)) projectile.hitEnemyIndices = new Set();
+  projectile.hitEnemyIndices.clear();
+  return projectile;
+}
+
+function queueShotSound(world, events, volume = 0.24) {
+  if (world.shotSoundCooldownMs > 0) return;
+  events.push({ type: 'sfx', id: 'shot', volume });
+  world.shotSoundCooldownMs = 70;
+}
+
+function targetAngle(world, originX = world.player.x, originY = world.player.y - 12) {
   const target = world.enemies.findNearest(world.player.x, world.player.y);
-  const centerAngle = target ? Math.atan2(target.y - world.player.y, target.x - world.player.x) : -Math.PI / 2;
-  const stats = derivePlayerStats(state.build);
-  const count = stats.projectileCount;
-  const spreadStep = 0.18;
-  for (let index = 0; index < count; index += 1) {
-    const offset = (index - (count - 1) / 2) * spreadStep;
-    const angle = centerAngle + offset;
-    world.playerBullets.acquire({
-      x: world.player.x,
-      y: world.player.y - 12,
-      vx: Math.cos(angle) * 520,
-      vy: Math.sin(angle) * 520,
+  return target ? Math.atan2(target.y - originY, target.x - originX) : -Math.PI / 2;
+}
+
+function fireCarrot(world, stats, events) {
+  const originX = world.player.x;
+  const originY = world.player.y - 12;
+  const centerAngle = targetAngle(world, originX, originY);
+  for (let index = 0; index < stats.projectileCount; index += 1) {
+    const angle = centerAngle + (index - (stats.projectileCount - 1) / 2) * stats.spread;
+    acquirePlayerProjectile(world, {
+      x: originX,
+      y: originY,
+      vx: Math.cos(angle) * stats.speed,
+      vy: Math.sin(angle) * stats.speed,
       radius: 4,
-      damage: 1,
-      pierceLeft: stats.pierce,
+      weaponId: 'carrot',
+      damage: stats.damage,
       rotation: angle,
-      ageMs: 0
+      maxAgeMs: 1_800
     });
   }
-  if (world.shotSoundCooldownMs <= 0) {
-    events.push({ type: 'sfx', id: 'shot', volume: 0.24 });
-    world.shotSoundCooldownMs = 70;
+  queueShotSound(world, events, 0.22);
+}
+
+function fireDandelion(world, stats, events) {
+  const originX = world.player.x;
+  const originY = world.player.y - 12;
+  const centerAngle = targetAngle(world, originX, originY);
+  for (let index = 0; index < stats.projectileCount; index += 1) {
+    const ratio = stats.projectileCount === 1 ? 0 : index / (stats.projectileCount - 1) - 0.5;
+    const angle = centerAngle + ratio * stats.spread;
+    acquirePlayerProjectile(world, {
+      x: originX,
+      y: originY,
+      vx: Math.cos(angle) * stats.speed,
+      vy: Math.sin(angle) * stats.speed,
+      radius: 3,
+      weaponId: 'dandelion',
+      damage: stats.damage,
+      rotation: angle,
+      maxAgeMs: 1_650
+    });
   }
-  world.player.fireCooldownMs = stats.fireIntervalMs;
+  queueShotSound(world, events, 0.18);
+}
+
+function fireBoomerang(world, stats, events) {
+  const originX = world.player.x;
+  const originY = world.player.y - 12;
+  const angle = targetAngle(world, originX, originY);
+  acquirePlayerProjectile(world, {
+    x: originX,
+    y: originY,
+    vx: Math.cos(angle) * stats.speed,
+    vy: Math.sin(angle) * stats.speed,
+    radius: 7,
+    weaponId: 'boomerang',
+    mode: 'boomerang',
+    damage: stats.damage,
+    rotation: angle,
+    returnAfterMs: stats.returnAfterMs,
+    maxAgeMs: 2_200,
+    maxTargets: stats.maxTargets
+  });
+  queueShotSound(world, events, 0.2);
+}
+
+function activeEnemies(world) {
+  const enemies = [];
+  world.enemies.forEachActive((enemy) => enemies.push(enemy));
+  return enemies;
+}
+
+function fireLightning(world, stats, events) {
+  const targets = activeEnemies(world)
+    .sort((a, b) => (
+      (a.x - world.player.x) ** 2 + (a.y - world.player.y) ** 2
+      - ((b.x - world.player.x) ** 2 + (b.y - world.player.y) ** 2)
+    ))
+    .slice(0, stats.chainCount);
+  if (targets.length === 0) return false;
+  const points = [{ x: world.player.x, y: world.player.y - 12 }];
+  for (const enemy of targets) {
+    points.push({ x: enemy.x, y: enemy.y });
+    damageEnemy(world, enemy, stats.damage, enemy.x, enemy.y);
+  }
+  world.weaponEffects.acquire({ weaponId: 'lightning', points, lifeMs: 230, ageMs: 0 });
+  queueShotSound(world, events, 0.16);
+  return true;
+}
+
+function updateBubbleWeapon(world, state, stats) {
+  if (stats.level <= 0) {
+    world.orbitals.clear();
+    return;
+  }
+  if (world.weaponCooldownMs.bubble <= 0) {
+    const orbitals = [];
+    world.orbitals.forEachActive((orbital) => orbitals.push(orbital));
+    while (orbitals.length < stats.projectileCount) {
+      const orbital = world.orbitals.acquire({
+        x: world.player.x,
+        y: world.player.y,
+        vx: 0,
+        vy: 0,
+        radius: 7,
+        rotation: 0,
+        ageMs: 0,
+        weaponId: 'bubble',
+        slotIndex: orbitals.length,
+        damage: stats.damage,
+        ready: true
+      });
+      if (!orbital) break;
+      orbitals.push(orbital);
+    }
+    for (const orbital of orbitals) {
+      orbital.damage = stats.damage;
+      orbital.ready = true;
+    }
+    world.weaponCooldownMs.bubble = stats.fireIntervalMs;
+  }
+  const orbitals = [];
+  world.orbitals.forEachActive((orbital) => orbitals.push(orbital));
+  const count = Math.max(1, orbitals.length);
+  const baseAngle = state.elapsedMs / 620;
+  for (const orbital of orbitals) {
+    const angle = baseAngle + (orbital.slotIndex * Math.PI * 2) / count;
+    orbital.x = world.player.x + Math.cos(angle) * stats.orbitRadius;
+    orbital.y = world.player.y + Math.sin(angle) * stats.orbitRadius;
+    orbital.rotation = angle;
+    orbital.ageMs += 1;
+  }
+}
+
+function updateWeapons(world, state, dtMs, events) {
+  for (const id of WEAPON_IDS) {
+    world.weaponCooldownMs[id] = Math.max(0, world.weaponCooldownMs[id] - dtMs);
+  }
+  for (const slot of state.build.weaponSlots) {
+    if (!slot) continue;
+    const stats = deriveWeaponStats(state.build, slot.id);
+    if (slot.id === 'bubble') {
+      updateBubbleWeapon(world, state, stats);
+      continue;
+    }
+    if (world.weaponCooldownMs[slot.id] > 0) continue;
+    let fired = true;
+    if (slot.id === 'carrot') fireCarrot(world, stats, events);
+    else if (slot.id === 'dandelion') fireDandelion(world, stats, events);
+    else if (slot.id === 'boomerang') fireBoomerang(world, stats, events);
+    else if (slot.id === 'lightning') fired = fireLightning(world, stats, events);
+    if (fired) world.weaponCooldownMs[slot.id] = stats.fireIntervalMs;
+  }
 }
 
 function updatePlayer(world, state, input, dtMs) {
@@ -164,7 +354,7 @@ function updatePlayer(world, state, input, dtMs) {
   world.player.x += input.x * stats.speed * dt;
   world.player.y += input.y * stats.speed * dt;
   world.player.x = Math.max(18, Math.min(LOGICAL_WIDTH - 18, world.player.x));
-  world.player.y = Math.max(76, Math.min(LOGICAL_HEIGHT - 36, world.player.y));
+  world.player.y = Math.max(116, Math.min(LOGICAL_HEIGHT - 36, world.player.y));
   world.player.fireCooldownMs -= dtMs;
 }
 
@@ -211,7 +401,8 @@ function updateLevelOneTutorial(world, state) {
       radius: 12,
       speed: 0,
       xpValue: 8,
-      shotCooldownMs: Infinity
+      shotCooldownMs: Infinity,
+      entityId: world.nextEnemyId++
     });
   }
   if (!world.tutorialBulletFired && state.elapsedMs >= 3_600) {
@@ -282,36 +473,120 @@ function updateLevelTwoPatterns(world, state, dtMs, events) {
 
 function updateProjectiles(world, dtMs) {
   const dt = dtMs / 1000;
-  const updatePool = (pool) => pool.forEachActive((bullet) => {
+  world.playerBullets.forEachActive((bullet) => {
+    bullet.ageMs += dtMs;
+    if (bullet.weaponId === 'carrot') {
+      const target = world.enemies.findNearest(bullet.x, bullet.y);
+      if (target) {
+        const speed = Math.max(1, Math.hypot(bullet.vx, bullet.vy));
+        const dx = target.x - bullet.x;
+        const dy = target.y - bullet.y;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        const turn = Math.min(1, dtMs / 110);
+        const mixedX = (bullet.vx / speed) * (1 - turn) + (dx / distance) * turn;
+        const mixedY = (bullet.vy / speed) * (1 - turn) + (dy / distance) * turn;
+        const mixedLength = Math.max(0.001, Math.hypot(mixedX, mixedY));
+        bullet.vx = (mixedX / mixedLength) * speed;
+        bullet.vy = (mixedY / mixedLength) * speed;
+        bullet.rotation = Math.atan2(bullet.vy, bullet.vx);
+      }
+    }
+    if (bullet.mode === 'boomerang') {
+      bullet.rotation += dt * 9;
+      if (bullet.phase === 'outbound' && bullet.ageMs >= bullet.returnAfterMs) bullet.phase = 'returning';
+      if (bullet.phase === 'returning') {
+        const dx = world.player.x - bullet.x;
+        const dy = world.player.y - bullet.y;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        const speed = Math.max(260, Math.hypot(bullet.vx, bullet.vy));
+        bullet.vx = (dx / distance) * speed;
+        bullet.vy = (dy / distance) * speed;
+        if (distance < 12 && bullet.ageMs > bullet.returnAfterMs + 80) {
+          world.playerBullets.release(bullet);
+          return;
+        }
+      }
+    }
+    bullet.x += bullet.vx * dt;
+    bullet.y += bullet.vy * dt;
+    if (bullet.ageMs >= bullet.maxAgeMs) {
+      world.playerBullets.release(bullet);
+      return;
+    }
+    if (bullet.mode !== 'boomerang' && (
+      bullet.x < -BULLET_MARGIN || bullet.x > LOGICAL_WIDTH + BULLET_MARGIN
+      || bullet.y < -BULLET_MARGIN || bullet.y > LOGICAL_HEIGHT + BULLET_MARGIN
+    )) world.playerBullets.release(bullet);
+  });
+  world.enemyBullets.forEachActive((bullet) => {
     bullet.x += bullet.vx * dt;
     bullet.y += bullet.vy * dt;
     bullet.ageMs += dtMs;
-    if (bullet.x < -BULLET_MARGIN || bullet.x > LOGICAL_WIDTH + BULLET_MARGIN || bullet.y < -BULLET_MARGIN || bullet.y > LOGICAL_HEIGHT + BULLET_MARGIN) pool.release(bullet);
+    if (bullet.x < -BULLET_MARGIN || bullet.x > LOGICAL_WIDTH + BULLET_MARGIN || bullet.y < -BULLET_MARGIN || bullet.y > LOGICAL_HEIGHT + BULLET_MARGIN) {
+      world.enemyBullets.release(bullet);
+    }
   });
-  updatePool(world.playerBullets);
-  updatePool(world.enemyBullets);
+  world.weaponEffects.forEachActive((effect) => {
+    effect.ageMs += dtMs;
+    effect.lifeMs -= dtMs;
+    if (effect.lifeMs <= 0) world.weaponEffects.release(effect);
+  });
 }
 
 function circlesTouch(a, b, extra = 0) {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 <= (a.radius + b.radius + extra) ** 2;
 }
 
-function resolveCombatCollisions(world, state, events) {
+function damageEnemy(world, enemy, damage, x = enemy.x, y = enemy.y) {
+  if (!enemy.active) return false;
+  enemy.hp -= damage;
+  spawnParticleBurst(world, x, y, '#f4d45f', 3);
+  if (enemy.hp > 0) return false;
+  if (Number.isFinite(enemy.xpValue) && enemy.xpValue > 0) spawnPickup(world, enemy);
+  spawnParticleBurst(world, enemy.x, enemy.y, '#f4c95f', 8);
+  world.enemies.release(enemy);
+  return true;
+}
+
+function resolvePlayerProjectileCollisions(world) {
   world.playerBullets.forEachActive((bullet) => {
     world.enemies.forEachActive((enemy) => {
       if (!bullet.active || !enemy.active || !circlesTouch(bullet, enemy)) return;
-      enemy.hp -= bullet.damage;
-      spawnParticleBurst(world, bullet.x, bullet.y, '#f8df72', 3);
+      if (bullet.mode === 'boomerang') {
+        if (!Number.isFinite(enemy.entityId)) enemy.entityId = world.nextEnemyId++;
+        if (bullet.hitEnemyIndices.has(enemy.entityId)) return;
+        bullet.hitEnemyIndices.add(enemy.entityId);
+        bullet.lastHitPoolIndex = enemy.poolIndex;
+        bullet.lastHitAgeMs = bullet.ageMs;
+        damageEnemy(world, enemy, bullet.damage, bullet.x, bullet.y);
+        if (bullet.hitEnemyIndices.size >= bullet.maxTargets) world.playerBullets.release(bullet);
+        return;
+      }
+      damageEnemy(world, enemy, bullet.damage, bullet.x, bullet.y);
       if (bullet.pierceLeft > 0) bullet.pierceLeft -= 1;
       else world.playerBullets.release(bullet);
-      if (enemy.hp <= 0) {
-        spawnPickup(world, enemy);
-        spawnParticleBurst(world, enemy.x, enemy.y, '#f4c95f', 8);
-        world.enemies.release(enemy);
-      }
     });
   });
+}
 
+function resolveOrbitalCollisions(world) {
+  world.orbitals.forEachActive((orbital) => {
+    if (!orbital.ready) return;
+    world.enemyBullets.forEachActive((bullet) => {
+      if (!orbital.ready || !bullet.active || !circlesTouch(orbital, bullet)) return;
+      world.enemyBullets.release(bullet);
+      orbital.ready = false;
+      spawnParticleBurst(world, orbital.x, orbital.y, '#83bfd1', 4);
+    });
+    world.enemies.forEachActive((enemy) => {
+      if (!orbital.ready || !enemy.active || !circlesTouch(orbital, enemy)) return;
+      damageEnemy(world, enemy, orbital.damage, orbital.x, orbital.y);
+      orbital.ready = false;
+    });
+  });
+}
+
+function resolvePlayerDamage(world, state, events) {
   let hit = false;
   world.enemyBullets.forEachActive((bullet) => {
     if (hit) return;
@@ -351,6 +626,12 @@ function resolveCombatCollisions(world, state, events) {
       events.push({ type: 'defeated' });
     }
   }
+}
+
+function resolveCombatCollisions(world, state, events) {
+  resolvePlayerProjectileCollisions(world);
+  resolveOrbitalCollisions(world);
+  resolvePlayerDamage(world, state, events);
 }
 
 function updatePickups(world, state, dtMs) {
@@ -427,7 +708,7 @@ export function updateWorld({ world, state, input, dtMs }) {
     if (!tutorialActive) updateLevelOnePatterns(world, dtMs);
   } else updateLevelTwoPatterns(world, state, dtMs, events);
 
-  if (world.player.fireCooldownMs <= 0) spawnPlayerVolley(world, state, events);
+  updateWeapons(world, state, dtMs, events);
   updateProjectiles(world, dtMs);
   resolveCombatCollisions(world, state, events);
   updatePickups(world, state, dtMs);

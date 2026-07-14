@@ -20,7 +20,8 @@ export const POOL_LIMITS = Object.freeze({
   ENEMIES: 48,
   PLAYER_BULLETS: 128,
   ENEMY_BULLETS: 450,
+  ORBITALS: 3,
+  WEAPON_EFFECTS: 24,
   PICKUPS: 96,
   PARTICLES: 160
 });
-

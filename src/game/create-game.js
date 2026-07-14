@@ -251,12 +251,12 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         platform.audio.stop();
         platform.a11y.announce(`挑战失败，存活${(state.elapsedMs / 1000).toFixed(1)}秒。`);
       } else if (event.type === 'upgrade-ready' && state.phase === PHASES.PLAYING) {
-        choices = getUpgradeChoices({ build: state.build, health: state.health, rng })
+        choices = getUpgradeChoices({ build: state.build, health: state.health, maxHealth: state.maxHealth, rng })
           .map((choice) => ({ ...choice, preview: getUpgradePreview(state, choice.id) }));
         if (choices.length > 0) {
           state.phase = PHASES.UPGRADE;
           platform.input.setJoystickEnabled(false);
-          platform.a11y.announce('升级，请选择一个能力。');
+          platform.a11y.announce('升级，请选择一个武器或能力。');
         }
       } else if (event.type === 'level-complete') finishLevel(event.levelId);
     }
@@ -333,7 +333,8 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         joystickCenterX: joystick.center.x.toFixed(2),
         joystickCenterY: joystick.center.y.toFixed(2),
         joystickVectorX: joystick.vector.x.toFixed(3),
-        joystickVectorY: joystick.vector.y.toFixed(3)
+        joystickVectorY: joystick.vector.y.toFixed(3),
+        weapons: state.build.weaponSlots.filter(Boolean).map((slot) => `${slot.id}:${slot.level}`).join('|')
       });
     }
     renderer.setDpr(platform.viewport.devicePixelRatio());
@@ -382,9 +383,12 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
           enemies: world.enemies.activeCount,
           playerBullets: world.playerBullets.activeCount,
           enemyBullets: world.enemyBullets.activeCount,
+          orbitals: world.orbitals.activeCount,
+          weaponEffects: world.weaponEffects.activeCount,
           pickups: world.pickups.activeCount
         },
         droppedEnemyBullets: world.metrics.droppedEnemyBullets,
+        droppedPlayerBullets: world.metrics.droppedPlayerBullets,
         readyMs: state.readyMs,
         patternBand: world.patternBand,
         patternWarningBand: world.patternWarning?.nextBand ?? 0,

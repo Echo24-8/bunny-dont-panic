@@ -1,9 +1,10 @@
 :root {
   color-scheme: light;
-  --page-sky: #d8edf0;
-  --page-leaf: #7ea991;
-  --ink: #263e43;
-  --focus: #d94855;
+  --page-paper: #fff0ba;
+  --page-leaf: #68bd7f;
+  --ink: #344f5c;
+  --focus: #d94a56;
+  --grid: rgba(92, 139, 158, .13);
 }
 
 * { box-sizing: border-box; }
@@ -16,7 +17,7 @@ body {
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
-  background: var(--page-sky);
+  background: var(--page-paper);
 }
 
 body {
@@ -26,11 +27,11 @@ body {
   padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   color: var(--ink);
   font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
-  background-color: var(--page-sky);
+  background-color: var(--page-paper);
   background-image:
-    radial-gradient(circle at 18% 22%, rgba(255, 255, 255, .58) 0 2px, transparent 3px),
-    radial-gradient(circle at 82% 72%, rgba(48, 93, 78, .12) 0 1px, transparent 2px);
-  background-size: 38px 38px, 31px 31px;
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 .game-shell {
@@ -39,10 +40,10 @@ body {
   aspect-ratio: 9 / 16;
   max-height: calc(100dvh - 16px);
   overflow: hidden;
-  border: 1px solid rgba(38, 62, 67, .24);
+  border: 0;
   border-radius: 8px;
-  background: #a9d5d5;
-  box-shadow: 0 18px 48px rgba(42, 73, 69, .2), 0 2px 0 rgba(255, 255, 255, .74) inset;
+  background: #a9dce7;
+  box-shadow: 0 0 0 5px #fffdf7 inset, 6px 7px 0 rgba(52, 79, 92, .18), 0 18px 42px rgba(52, 79, 92, .16);
 }
 
 canvas {
@@ -103,6 +104,7 @@ canvas:focus-visible {
     max-height: 100dvh;
     border: 0;
     border-radius: 0;
+    box-shadow: none;
   }
 }
 
@@ -113,4 +115,3 @@ canvas:focus-visible {
     animation-duration: .01ms !important;
   }
 }
-
