@@ -16,12 +16,16 @@ test('clear badges preserve first clear prestige', () => {
   assert.equal(getClearBadge(4), '成长通关');
 });
 
-test('build summary lists active abilities and folds overflow', () => {
+test('build summary lists weapons before abilities and folds overflow', () => {
   assert.equal(summarizeBuild({}), '基础能力');
-  assert.equal(summarizeBuild({ rapidFire: 2, splitShot: 1 }), '连发 Lv2 · 散射 Lv1');
   assert.equal(
-    summarizeBuild({ rapidFire: 2, splitShot: 1, pierce: 1, moveSpeed: 3 }),
-    '连发 Lv2 · 散射 Lv1 · 穿透 Lv1 · 另有 1 项'
+    summarizeBuild({
+      rapidFire: 2,
+      moveSpeed: 3,
+      shield: 0,
+      weaponSlots: [{ id: 'carrot', level: 1 }, { id: 'dandelion', level: 2 }, null]
+    }),
+    '胡萝卜飞镖 Lv1 · 蒲公英散射 Lv2 · 连发 Lv2 · 另有 1 项'
   );
 });
 
@@ -36,9 +40,27 @@ test('result summary captures result record attempt badge and build', () => {
     bestSurvivalMs: 60_000,
     attempt: 1,
     badge: '初见通关',
-    build: { rapidFire: 2, splitShot: 0, pierce: 0, moveSpeed: 0, shield: 0 },
-    buildSummary: '连发 Lv2'
+    build: {
+      rapidFire: 2,
+      moveSpeed: 0,
+      shield: 0,
+      weaponSlots: [{ id: 'carrot', level: 1 }, null, null]
+    },
+    buildSummary: '胡萝卜飞镖 Lv1 · 连发 Lv2'
   });
+});
+
+test('result summary deep-clones weapon slots', () => {
+  const state = startNewRun(createInitialState());
+  state.build.weaponSlots[1] = { id: 'bubble', level: 2 };
+  recordLevelTwoResult(state, 'defeat', 12_000);
+
+  const summary = createResultSummary(state);
+  assert.notStrictEqual(summary.build.weaponSlots, state.build.weaponSlots);
+  assert.notStrictEqual(summary.build.weaponSlots[1], state.build.weaponSlots[1]);
+
+  state.build.weaponSlots[1].level = 3;
+  assert.equal(summary.build.weaponSlots[1].level, 2);
 });
 
 test('public share URL requires public HTTPS and removes debug mode', () => {
@@ -67,18 +89,18 @@ test('public share URL requires public HTTPS and removes debug mode', () => {
 test('share payload uses truthful result text and omits private URLs', () => {
   const defeat = {
     kind: 'defeat', survivalMs: 12_340, bestSurvivalMs: 12_340, attempt: 2,
-    badge: '', buildSummary: '散射 Lv1'
+    badge: '', buildSummary: '蒲公英散射 Lv1'
   };
   assert.deepEqual(createSharePayload(defeat, 'http://localhost:4173/?debug=1'), {
     title: '兔兔别慌战绩',
-    text: '我在《兔兔别慌》第二关存活了 12.3 秒。 散射 Lv1',
+    text: '我在《兔兔别慌》第二关存活了 12.3 秒。 蒲公英散射 Lv1',
     url: ''
   });
 
   const success = { ...defeat, kind: 'success', survivalMs: 60_000, badge: '逆袭通关' };
   assert.deepEqual(createSharePayload(success, 'https://game.example/?debug=1'), {
     title: '兔兔别慌战绩',
-    text: '我在《兔兔别慌》撑满了 60 秒，逆袭通关！ 散射 Lv1',
+    text: '我在《兔兔别慌》撑满了 60 秒，逆袭通关！ 蒲公英散射 Lv1',
     url: 'https://game.example/'
   });
 });

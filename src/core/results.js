@@ -1,7 +1,8 @@
+import { cloneBuild } from './state.js';
+import { WEAPON_DEFINITIONS } from './weapons.js';
+
 const BUILD_LABELS = Object.freeze({
   rapidFire: '连发',
-  splitShot: '散射',
-  pierce: '穿透',
   moveSpeed: '移速',
   shield: '护盾'
 });
@@ -13,9 +14,14 @@ export function getClearBadge(attempt) {
 }
 
 export function summarizeBuild(build, limit = 3) {
-  const active = Object.entries(BUILD_LABELS)
+  const weaponLabels = new Map(WEAPON_DEFINITIONS.map((definition) => [definition.id, definition.title]));
+  const weapons = (build.weaponSlots ?? [])
+    .filter(Boolean)
+    .map((slot) => `${weaponLabels.get(slot.id) ?? slot.id} Lv${slot.level}`);
+  const abilities = Object.entries(BUILD_LABELS)
     .filter(([id]) => (build[id] ?? 0) > 0)
     .map(([id, label]) => `${label} Lv${build[id]}`);
+  const active = [...weapons, ...abilities];
   if (active.length === 0) return '基础能力';
   const visible = active.slice(0, limit);
   if (active.length > limit) visible.push(`另有 ${active.length - limit} 项`);
@@ -54,7 +60,7 @@ export function createResultSummary(state) {
     bestSurvivalMs: state.sessionBestSurvivalMs,
     attempt: state.level2Attempt,
     badge: result.kind === 'success' ? getClearBadge(state.level2Attempt) : '',
-    build: { ...state.build },
+    build: cloneBuild(state.build),
     buildSummary: summarizeBuild(state.build)
   };
 }

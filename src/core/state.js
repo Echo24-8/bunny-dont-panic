@@ -1,7 +1,17 @@
 import { LEVELS, PHASES } from './constants.js';
+import { cloneWeaponSlots, createDefaultWeaponSlots } from './weapons.js';
 
 export function createBuild() {
-  return { rapidFire: 0, splitShot: 0, pierce: 0, moveSpeed: 0, shield: 0 };
+  return { rapidFire: 0, moveSpeed: 0, shield: 0, weaponSlots: createDefaultWeaponSlots() };
+}
+
+export function cloneBuild(build = createBuild()) {
+  return {
+    rapidFire: build.rapidFire ?? 0,
+    moveSpeed: build.moveSpeed ?? 0,
+    shield: build.shield ?? 0,
+    weaponSlots: cloneWeaponSlots(build.weaponSlots ?? createDefaultWeaponSlots())
+  };
 }
 
 export function createInitialState() {
@@ -78,7 +88,7 @@ export function startLevelTwo(state) {
 }
 
 export function retryLevelTwoState(state) {
-  const retainedBuild = { ...state.build };
+  const retainedBuild = cloneBuild(state.build);
   const retainedUpgradeCount = state.upgradeCount;
   Object.assign(state, {
     phase: PHASES.PLAYING,
@@ -125,4 +135,3 @@ export function takeDamage(state) {
 export function shieldRechargeMs(level) {
   return [0, 14_000, 12_000, 10_000, 8_000, 6_000][Math.min(5, Math.max(0, level))];
 }
-

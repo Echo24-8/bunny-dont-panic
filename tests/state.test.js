@@ -17,7 +17,14 @@ test('new run starts level one with clean health and build', () => {
   assert.equal(state.levelId, 1);
   assert.equal(state.remainingMs, 30_000);
   assert.equal(state.health, 3);
-  assert.deepEqual(state.build, { rapidFire: 0, splitShot: 0, pierce: 0, moveSpeed: 0, shield: 0 });
+  assert.deepEqual(state.build, {
+    rapidFire: 0,
+    moveSpeed: 0,
+    shield: 0,
+    weaponSlots: [{ id: 'carrot', level: 1 }, null, null]
+  });
+  assert.equal('splitShot' in state.build, false);
+  assert.equal('pierce' in state.build, false);
 });
 
 test('transition preserves health and build into level two', () => {
@@ -40,31 +47,41 @@ test('level two starts with one second preparation and first attempt', () => {
   assert.equal(state.level2Attempt, 1);
 });
 
-test('level two retry restores health and retains all selected abilities', () => {
+test('level two retry restores health and deeply retains the complete build', () => {
   const state = startNewRun(createInitialState());
   startLevelTwo(state);
   state.health = 0;
   state.xp = 11;
   state.upgradeCount = 4;
-  state.build.splitShot = 2;
+  state.build.rapidFire = 2;
+  state.build.weaponSlots[1] = { id: 'dandelion', level: 2 };
+  const previousSlots = state.build.weaponSlots;
+  const previousDandelion = state.build.weaponSlots[1];
   retryLevelTwoState(state);
   assert.equal(state.health, 3);
   assert.equal(state.xp, 0);
   assert.equal(state.upgradeCount, 4);
-  assert.equal(state.build.splitShot, 2);
+  assert.equal(state.build.rapidFire, 2);
+  assert.deepEqual(state.build.weaponSlots, [
+    { id: 'carrot', level: 1 },
+    { id: 'dandelion', level: 2 },
+    null
+  ]);
+  assert.notStrictEqual(state.build.weaponSlots, previousSlots);
+  assert.notStrictEqual(state.build.weaponSlots[1], previousDandelion);
 });
 
 test('retry increments attempt and preserves retained progression', () => {
   const state = startNewRun(createInitialState());
   startLevelTwo(state);
-  state.build.splitShot = 2;
+  state.build.weaponSlots[1] = { id: 'boomerang', level: 2 };
   state.upgradeCount = 4;
   retryLevelTwoState(state);
   assert.equal(state.readyMs, 1_000);
   assert.equal(state.level2Attempt, 2);
   assert.equal(state.health, 3);
   assert.equal(state.xp, 0);
-  assert.equal(state.build.splitShot, 2);
+  assert.equal(state.build.weaponSlots[1].level, 2);
   assert.equal(state.upgradeCount, 4);
 });
 
@@ -103,4 +120,3 @@ test('ready shield absorbs damage before health', () => {
   assert.equal(state.health, 3);
   assert.equal(state.shieldReady, false);
 });
-
