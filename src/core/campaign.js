@@ -13,7 +13,7 @@ export function getEventReward(event, state = {}) {
   if (event.kind === 'strengthen') return { type: 'skill-cooldown', amount: 2_000 };
   if (event.kind === 'rest') return { type: 'shield', charges: 1 };
   if (event.kind === 'exchange') return { type: 'upgrade', quality: 'rare' };
-  if (event.kind === 'adventure') return { type: 'elite-reward', amount: 2 };
+  if (event.kind === 'adventure') return { type: 'xp', amount: 8 };
   return { type: 'supply' };
 }
 
