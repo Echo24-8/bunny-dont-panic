@@ -1,4 +1,6 @@
 import { LEVELS, LOGICAL_HEIGHT, LOGICAL_WIDTH, POOL_LIMITS } from './constants.js';
+import { applyEliteAffix, createEliteSpec, ELITE_AFFIXES } from './elites.js';
+import { advanceBossPhase, createBossState, getBossAttackSpec } from './bosses.js';
 import { ObjectPool } from './object-pool.js';
 import {
   getLevelTwoPatternSpec,
@@ -53,6 +55,14 @@ export function createWorld(rng = Math.random) {
     grazeEffectCooldownMs: 0,
     tutorialEnemySpawned: false,
     tutorialBulletFired: false,
+    eliteWarningSent: false,
+    eliteSpawned: false,
+    runEliteDefeated: false,
+    bossState: null,
+    bossSpawned: false,
+    bossAttackCooldownMs: Infinity,
+    bossAttackWarningMs: 0,
+    bossWarningSent: false,
     shotSoundCooldownMs: 0,
     weaponCooldownMs: Object.fromEntries(WEAPON_IDS.map((id) => [id, 0])),
     nextEnemyId: 1,
@@ -80,11 +90,58 @@ export function resetWorld(world) {
   world.grazeEffectCooldownMs = 0;
   world.tutorialEnemySpawned = false;
   world.tutorialBulletFired = false;
+  world.eliteWarningSent = false;
+  world.eliteSpawned = false;
+  world.bossState = null;
+  world.bossSpawned = false;
+  world.bossAttackCooldownMs = Infinity;
+  world.bossAttackWarningMs = 0;
+  world.bossWarningSent = false;
   world.shotSoundCooldownMs = 0;
   for (const id of WEAPON_IDS) world.weaponCooldownMs[id] = 0;
   world.nextEnemyId = 1;
   world.metrics.droppedEnemyBullets = 0;
   world.metrics.droppedPlayerBullets = 0;
+}
+
+export function applyActiveSkillEffects(world, state, effects = []) {
+  const events = [];
+  for (const effect of effects) {
+    if (!effect) continue;
+    if (effect.type === 'dash') {
+      const direction = effect.direction ?? { x: 0, y: -1 };
+      const distance = Number(effect.distance) || 0;
+      world.player.x = Math.max(18, Math.min(LOGICAL_WIDTH - 18, world.player.x + direction.x * distance));
+      world.player.y = Math.max(116, Math.min(LOGICAL_HEIGHT - 36, world.player.y + direction.y * distance));
+      state.invulnerableMs = Math.max(state.invulnerableMs ?? 0, effect.invulnerableMs ?? 0);
+      events.push({ type: 'active-skill', skill: 'dash' });
+      continue;
+    }
+    if (effect.type === 'shield') {
+      state.activeShieldCharges = Math.max(state.activeShieldCharges ?? 0, effect.shieldCharges ?? 0);
+      state.activeSkill.activeMs = Math.max(state.activeSkill.activeMs, effect.activeMs ?? 0);
+      events.push({ type: 'active-skill', skill: 'cottonGuard' });
+      continue;
+    }
+    if (effect.type === 'clear-and-damage') {
+      const clearRadius = Number(effect.clearRadius) || 0;
+      const clearRadiusSquared = clearRadius * clearRadius;
+      world.enemyBullets.forEachActive((bullet) => {
+        if ((bullet.x - world.player.x) ** 2 + (bullet.y - world.player.y) ** 2 <= clearRadiusSquared) {
+          world.enemyBullets.release(bullet);
+        }
+      });
+      const damageRadius = Number(effect.radius) || clearRadius;
+      const damageRadiusSquared = damageRadius * damageRadius;
+      world.enemies.forEachActive((enemy) => {
+        if ((enemy.x - world.player.x) ** 2 + (enemy.y - world.player.y) ** 2 <= damageRadiusSquared) {
+          damageEnemy(world, enemy, Number(effect.damage) || 0, enemy.x, enemy.y);
+        }
+      });
+      events.push({ type: 'active-skill', skill: 'forestEcho' });
+    }
+  }
+  return events;
 }
 
 function acquireEnemyBullet(world, specification) {
@@ -130,6 +187,52 @@ function spawnEnemy(world, levelId) {
     shotCooldownMs: 900 + world.rng() * 900,
     entityId: world.nextEnemyId++
   });
+}
+
+function activeEliteCount(world) {
+  let count = 0;
+  world.enemies.forEachActive((enemy) => { if (enemy.kind === 'elite') count += 1; });
+  return count;
+}
+
+function spawnElite(world) {
+  if (world.eliteSpawned || activeEliteCount(world) > 0) return null;
+  const affix = ELITE_AFFIXES[Math.floor(world.rng() * ELITE_AFFIXES.length)];
+  const spec = createEliteSpec({ affix, x: 180, y: 106, levelId: LEVELS.THREE });
+  if (!spec) return null;
+  applyEliteAffix(spec, affix);
+  spec.xpValue = 10;
+  spec.shotCooldownMs = 900;
+  spec.entityId = world.nextEnemyId++;
+  const elite = world.enemies.acquire(spec);
+  if (elite) world.eliteSpawned = true;
+  return elite;
+}
+
+function spawnBoss(world) {
+  if (world.bossSpawned) return null;
+  const bossState = createBossState();
+  const boss = world.enemies.acquire({
+    x: 180,
+    y: 142,
+    vx: 0,
+    vy: 0,
+    ageMs: 0,
+    rotation: 0,
+    kind: 'boss',
+    hp: bossState.hp,
+    maxHp: bossState.maxHp,
+    radius: 28,
+    speed: 0,
+    xpValue: 20,
+    shotCooldownMs: Infinity,
+    entityId: world.nextEnemyId++
+  });
+  if (!boss) return null;
+  world.bossState = bossState;
+  world.bossSpawned = true;
+  world.bossAttackCooldownMs = 900;
+  return boss;
 }
 
 function spawnParticleBurst(world, x, y, color, count = 6, kind = 'combat') {
@@ -358,18 +461,31 @@ function updatePlayer(world, state, input, dtMs) {
   world.player.fireCooldownMs -= dtMs;
 }
 
-function updateEnemies(world, state, dtMs) {
+function updateEnemies(world, state, dtMs, events = []) {
   const dt = dtMs / 1000;
   world.enemies.forEachActive((enemy) => {
     enemy.ageMs += dtMs;
     const dx = world.player.x - enemy.x;
     const dy = world.player.y - enemy.y;
     const length = Math.max(1, Math.hypot(dx, dy));
-    const movementScale = enemy.kind === 'star' ? 0.24 : 1;
+    const movementScale = enemy.kind === 'star' ? 0.24 : enemy.kind === 'elite' ? 0.72 : enemy.kind === 'boss' ? 0 : 1;
     enemy.x += (dx / length) * enemy.speed * movementScale * dt;
     enemy.y += (dy / length) * enemy.speed * movementScale * dt;
     enemy.rotation += dt * (enemy.kind === 'star' ? 1.8 : 0.55);
     enemy.shotCooldownMs -= dtMs;
+    if (enemy.kind === 'boss' && world.bossState) {
+      world.bossState.hp = Math.max(0, enemy.hp);
+      if (advanceBossPhase(world.bossState, world.bossState.hp / world.bossState.maxHp)) {
+        events.push({ type: 'boss-phase', phase: world.bossState.phase });
+      }
+    }
+    if (enemy.kind === 'elite' && enemy.affix === 'summoner') {
+      enemy.summonCooldownMs -= dtMs;
+      if (enemy.summonCooldownMs <= 0) {
+        spawnEnemy(world, state.levelId);
+        enemy.summonCooldownMs = 4_000;
+      }
+    }
     if (state.levelId === LEVELS.ONE && enemy.kind !== 'puff' && enemy.shotCooldownMs <= 0) {
       const teachingOffset = enemy.poolIndex % 2 === 0 ? -52 : 52;
       const bullet = makeAimed({
@@ -471,6 +587,26 @@ function updateLevelTwoPatterns(world, state, dtMs, events) {
   }
 }
 
+function updateBossPatterns(world, state, dtMs, events) {
+  if (!world.bossState) return;
+  world.bossAttackCooldownMs -= dtMs;
+  world.bossAttackWarningMs = Math.max(0, world.bossAttackWarningMs - dtMs);
+  if (world.bossAttackCooldownMs <= 0) {
+    const spec = getBossAttackSpec({ phase: world.bossState.phase, attackIndex: world.bossState.attackIndex, seed: state.campaign?.seed ?? 0 });
+    if (!world.bossWarningSent) {
+      world.bossWarningSent = true;
+      world.bossAttackWarningMs = spec.warningMs;
+      world.bossAttackCooldownMs = spec.warningMs;
+      events.push({ type: 'boss-warning', warningMs: spec.warningMs });
+      return;
+    }
+    emitPatternSpec(world, spec);
+    world.bossState.attackIndex += 1;
+    world.bossAttackCooldownMs = spec.cooldownMs;
+    world.bossWarningSent = false;
+  }
+}
+
 function updateProjectiles(world, dtMs) {
   const dt = dtMs / 1000;
   world.playerBullets.forEachActive((bullet) => {
@@ -544,6 +680,28 @@ function damageEnemy(world, enemy, damage, x = enemy.x, y = enemy.y) {
   if (enemy.hp > 0) return false;
   if (Number.isFinite(enemy.xpValue) && enemy.xpValue > 0) spawnPickup(world, enemy);
   spawnParticleBurst(world, enemy.x, enemy.y, '#f4c95f', 8);
+  if (enemy.kind === 'elite' && enemy.affix === 'splitter') {
+    for (let index = 0; index < 2; index += 1) {
+      const angle = index === 0 ? -0.55 : 0.55;
+      world.enemies.acquire({
+        x: enemy.x + Math.cos(angle) * 12,
+        y: enemy.y + 18,
+        vx: 0,
+        vy: 0,
+        ageMs: 0,
+        rotation: 0,
+        kind: 'puff',
+        hp: 2,
+        maxHp: 2,
+        radius: 12,
+        speed: 44,
+        xpValue: 2,
+        shotCooldownMs: 1_500,
+        entityId: world.nextEnemyId++
+      });
+    }
+  }
+  if (enemy.kind === 'elite') world.runEliteDefeated = true;
   world.enemies.release(enemy);
   return true;
 }
@@ -632,6 +790,15 @@ function resolveCombatCollisions(world, state, events) {
   resolvePlayerProjectileCollisions(world);
   resolveOrbitalCollisions(world);
   resolvePlayerDamage(world, state, events);
+  if (world.bossSpawned && world.bossState && world.bossState.hp > 0) {
+    let bossAlive = false;
+    world.enemies.forEachActive((enemy) => { if (enemy.kind === 'boss') bossAlive = true; });
+    if (!bossAlive) {
+      world.bossState.hp = 0;
+      events.push({ type: 'boss-defeated' });
+      state.remainingMs = 0;
+    }
+  }
 }
 
 function updatePickups(world, state, dtMs) {
@@ -648,6 +815,7 @@ function updatePickups(world, state, dtMs) {
     }
     if (distance < 14) {
       state.xp += pickup.value;
+      spawnParticleBurst(world, world.player.x, world.player.y, '#f4d45f', 4, 'pickup');
       world.pickups.release(pickup);
     }
   });
@@ -693,6 +861,21 @@ export function updateWorld({ world, state, input, dtMs }) {
     return events;
   }
 
+  if (state.levelId === LEVELS.THREE) {
+    if (!world.eliteWarningSent && state.elapsedMs >= 10_000) {
+      world.eliteWarningSent = true;
+      events.push({ type: 'elite-warning' });
+    }
+    if (!world.eliteSpawned && state.elapsedMs >= 13_000) {
+      const elite = spawnElite(world);
+      if (elite) events.push({ type: 'elite-spawned', affix: elite.affix });
+    }
+  }
+  if (state.levelId === LEVELS.FOUR && !world.bossSpawned && state.elapsedMs >= 5_000) {
+    const boss = spawnBoss(world);
+    if (boss) events.push({ type: 'boss-spawned' });
+  }
+
   updatePlayer(world, state, input, dtMs);
   const tutorialActive = state.levelId === LEVELS.ONE && state.elapsedMs < 8_000;
   if (state.levelId === LEVELS.ONE) updateLevelOneTutorial(world, state);
@@ -703,10 +886,11 @@ export function updateWorld({ world, state, input, dtMs }) {
       world.spawnCooldownMs = state.levelId === LEVELS.ONE ? 1_100 : 720;
     }
   }
-  updateEnemies(world, state, dtMs);
+  updateEnemies(world, state, dtMs, events);
   if (state.levelId === LEVELS.ONE) {
     if (!tutorialActive) updateLevelOnePatterns(world, dtMs);
-  } else updateLevelTwoPatterns(world, state, dtMs, events);
+  } else if (state.levelId === LEVELS.FOUR) updateBossPatterns(world, state, dtMs, events);
+  else updateLevelTwoPatterns(world, state, dtMs, events);
 
   updateWeapons(world, state, dtMs, events);
   updateProjectiles(world, dtMs);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { UI_RECTS, WEAPON_SLOT_RECTS, getUpgradeCardRect } from '../src/render/renderer.js';
+import { UI_RECTS, WEAPON_SLOT_RECTS, getEventCardRect, getUpgradeCardRect } from '../src/render/renderer.js';
 
 test('result actions have mobile hit targets and do not overlap', () => {
   assert.deepEqual(UI_RECTS.retry, { x: 72, y: 404, width: 216, height: 54 });
@@ -13,6 +13,16 @@ test('result actions have mobile hit targets and do not overlap', () => {
   assert.ok(UI_RECTS.share.x + UI_RECTS.share.width < UI_RECTS.menu.x);
   assert.ok(UI_RECTS.retry.y + UI_RECTS.retry.height < UI_RECTS.share.y);
   assert.ok(UI_RECTS.menu.y + UI_RECTS.menu.height <= 560);
+});
+
+test('active skill button has a compact touch target in the lower right', () => {
+  const rect = UI_RECTS.activeSkill;
+  assert.deepEqual(rect, { x: 292, y: 564, width: 52, height: 52 });
+  assert.ok(rect.width >= 44);
+  assert.ok(rect.height >= 44);
+  assert.ok(rect.x + rect.width <= 360);
+  assert.ok(rect.y + rect.height <= 640);
+  assert.ok(rect.x > 180);
 });
 
 test('three weapon slots remain inside the compact top HUD', () => {
@@ -41,4 +51,15 @@ test('upgrade cards are large, separated, and fit the logical canvas', () => {
   for (let index = 1; index < rects.length; index += 1) {
     assert.ok(rects[index - 1].y + rects[index - 1].height < rects[index].y);
   }
+});
+
+test('event cards and boss bar leave stable HUD space', () => {
+  const rects = [getEventCardRect(0), getEventCardRect(1)];
+  for (const rect of rects) {
+    assert.ok(rect.width >= 44 && rect.height >= 44);
+    assert.ok(rect.x >= 0 && rect.x + rect.width <= 360);
+    assert.ok(rect.y >= 160 && rect.y + rect.height <= 640);
+  }
+  assert.ok(rects[0].y + rects[0].height < rects[1].y);
+  assert.ok(UI_RECTS.activeSkill.y >= 560);
 });

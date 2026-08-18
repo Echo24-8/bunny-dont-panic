@@ -1,4 +1,5 @@
 import { LEVELS, LOGICAL_HEIGHT, LOGICAL_WIDTH, PHASES } from '../core/constants.js';
+import { getActiveSkillDefinition } from '../core/active-skills.js';
 import { createResultSummary } from '../core/results.js';
 import { upgradeThreshold } from '../core/upgrades.js';
 import { WEAPON_DEFINITIONS } from '../core/weapons.js';
@@ -21,6 +22,7 @@ const ART = Object.freeze({
 export const UI_RECTS = Object.freeze({
   start: { x: 72, y: 438, width: 216, height: 58 },
   settings: { x: 300, y: 16, width: 44, height: 44 },
+  activeSkill: { x: 292, y: 564, width: 52, height: 52 },
   retry: { x: 72, y: 404, width: 216, height: 54 },
   share: { x: 36, y: 478, width: 136, height: 48 },
   menu: { x: 188, y: 478, width: 136, height: 48 },
@@ -37,6 +39,10 @@ export const WEAPON_SLOT_RECTS = Object.freeze([
 
 export function getUpgradeCardRect(index) {
   return { x: 24, y: 182 + index * 116, width: 312, height: 100 };
+}
+
+export function getEventCardRect(index) {
+  return { x: 24, y: 190 + index * 142, width: 312, height: 122 };
 }
 
 export function hitRect(point, rect) {
@@ -323,7 +329,7 @@ function drawMenu(ctx, assets, now, reducedMotion) {
   ctx.fillText('兔兔别慌', 180, 87);
   ctx.fillStyle = ART.inkMuted;
   ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('两关。第二关真的不慌。', 180, 129);
+  ctx.fillText('四关路线，每次选择都不一样。', 180, 129);
 
   const bob = reducedMotion ? 0 : Math.sin(now / 420) * 5;
   if (assets.bunny) ctx.drawImage(assets.bunny, 91, 176 + bob, 178, 178);
@@ -337,7 +343,20 @@ function drawEnemy(ctx, image, enemy) {
   ctx.save();
   ctx.translate(enemy.x, enemy.y);
   ctx.rotate(Math.sin(enemy.ageMs / 260 + enemy.poolIndex) * 0.08);
-  if (image) ctx.drawImage(image, -size / 2, -size / 2, size, size);
+  if (enemy.kind === 'elite') {
+    ctx.fillStyle = '#c95766';
+    ctx.strokeStyle = ART.gold;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius + 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff9e8';
+    ctx.font = '900 10px "Microsoft YaHei UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('精英', 0, 1);
+  } else if (image) ctx.drawImage(image, -size / 2, -size / 2, size, size);
   else {
     ctx.fillStyle = enemy.kind === 'star' ? '#f2ca63' : enemy.kind === 'bell' ? '#6d9fc0' : '#e89a82';
     ctx.beginPath();
@@ -553,6 +572,67 @@ function drawJoystickOutline(ctx, joystick) {
   ctx.stroke();
 }
 
+function drawActiveSkillIcon(ctx, id, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = ART.ink;
+  ctx.fillStyle = id === 'cottonGuard' ? ART.sky : id === 'forestEcho' ? ART.gold : ART.leaf;
+  ctx.lineWidth = 2;
+  if (id === 'cottonGuard') {
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(9, -6);
+    ctx.lineTo(7, 6);
+    ctx.lineTo(0, 11);
+    ctx.lineTo(-7, 6);
+    ctx.lineTo(-9, -6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (id === 'forestEcho') {
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-10, 4);
+    ctx.lineTo(2, -8);
+    ctx.lineTo(2, -2);
+    ctx.lineTo(11, -2);
+    ctx.lineTo(0, 9);
+    ctx.lineTo(0, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawActiveSkillButton(ctx, state) {
+  const rect = UI_RECTS.activeSkill;
+  const skillState = state.activeSkill ?? { id: 'dash', cooldownMs: 0 };
+  const definition = getActiveSkillDefinition(skillState.id);
+  const cooling = skillState.cooldownMs > 0;
+  fillRoundedRect(ctx, rect.x + 2, rect.y + 3, rect.width, rect.height, 8, '#c8b879');
+  fillRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 8, cooling ? 'rgba(255,253,247,.72)' : ART.sticker, cooling ? ART.inkMuted : ART.ink, 1.5);
+  drawActiveSkillIcon(ctx, definition.id, rect.x + rect.width / 2, rect.y + 20);
+  ctx.fillStyle = ART.ink;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '800 10px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText(definition.id === 'cottonGuard' ? '护体' : definition.id === 'forestEcho' ? '回响' : '冲刺', rect.x + rect.width / 2, rect.y + 42);
+  if (cooling) {
+    ctx.fillStyle = 'rgba(52,79,92,.58)';
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fillStyle = '#fffdf7';
+    ctx.font = '900 15px ui-monospace, monospace';
+    ctx.fillText(`${Math.ceil(skillState.cooldownMs / 1000)}`, rect.x + rect.width / 2, rect.y + rect.height / 2);
+  }
+}
+
 function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
   const joystick = input.getJoystickState();
   drawBackground(ctx, assets, state.levelId || LEVELS.ONE);
@@ -565,6 +645,16 @@ function drawWorld(ctx, assets, world, state, input, now, reducedMotion) {
   drawParticles(ctx, world.particles, reducedMotion);
   drawHitCore(ctx, world.player);
   drawHud(ctx, state, now, reducedMotion);
+  if (world.bossState) {
+    const progress = Math.max(0, Math.min(1, world.bossState.hp / world.bossState.maxHp));
+    fillRoundedRect(ctx, 84, 108, 192, 12, 6, 'rgba(52,79,92,.38)', '#fffdf7', 1.5);
+    if (progress > 0) fillRoundedRect(ctx, 84, 108, 192 * progress, 12, 6, world.bossState.phase === 2 ? ART.coral : ART.gold);
+    ctx.fillStyle = ART.paper;
+    ctx.textAlign = 'center';
+    ctx.font = '800 10px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText(`森林守护者 · 阶段 ${world.bossState.phase}`, 180, 114);
+  }
+  drawActiveSkillButton(ctx, state);
   drawJoystickOutline(ctx, joystick);
 }
 
@@ -717,12 +807,51 @@ function drawUpgradeOverlay(ctx, choices) {
     ctx.fillText(choice.preview?.levelText ?? '', rect.x + rect.width - 16, rect.y + 48, 78);
     ctx.textAlign = 'left';
     ctx.fillStyle = ART.inkMuted;
-    ctx.font = '500 13px "Microsoft YaHei UI", sans-serif';
-    ctx.fillText(choice.preview?.valueText ?? choice.description, rect.x + 82, rect.y + 74, rect.width - 102);
+    ctx.font = '500 12px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText(choice.preview?.valueText ?? choice.description, rect.x + 82, rect.y + 70, rect.width - 102);
+    if (choice.roleLabel) {
+      ctx.fillStyle = ART.chestnut;
+      ctx.font = '700 10px "Microsoft YaHei UI", sans-serif';
+      ctx.fillText(`定位：${choice.roleLabel}`, rect.x + 82, rect.y + 88, rect.width - 102);
+    }
     ctx.textAlign = 'right';
     ctx.fillStyle = ART.chestnut;
     ctx.font = '800 10px ui-monospace, monospace';
     ctx.fillText(String(index + 1), rect.x + rect.width - 14, rect.y + 18);
+  });
+}
+
+function drawEventOverlay(ctx, choices) {
+  ctx.fillStyle = 'rgba(35,58,64,.66)';
+  ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  ctx.fillStyle = ART.paper;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 28px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('选择一张事件卡', 180, 112);
+  ctx.font = '600 12px "Microsoft YaHei UI", sans-serif';
+  ctx.fillText('下一关的路线由你决定', 180, 142);
+  choices.forEach((choice, index) => {
+    const rect = getEventCardRect(index);
+    drawPaperPanel(ctx, rect.x, rect.y, rect.width, rect.height, { fill: index ? '#fffdf7' : ART.paper });
+    fillRoundedRect(ctx, rect.x + 12, rect.y + 12, 70, 22, 5, index ? '#d8eef1' : '#f7e8a9', 'rgba(52,79,92,.24)', 1);
+    ctx.fillStyle = ART.ink;
+    ctx.font = '800 11px "Microsoft YaHei UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`路线 ${index + 1}`, rect.x + 47, rect.y + 23);
+    ctx.textAlign = 'left';
+    ctx.font = '900 19px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText(choice.title, rect.x + 96, rect.y + 28);
+    ctx.fillStyle = ART.inkMuted;
+    ctx.font = '600 13px "Microsoft YaHei UI", sans-serif';
+    const description = String(choice.description ?? '').slice(0, 42);
+    ctx.fillText(description.slice(0, 21), rect.x + 16, rect.y + 68);
+    if (description.length > 21) ctx.fillText(description.slice(21, 42), rect.x + 16, rect.y + 88);
+    ctx.fillStyle = ART.chestnut;
+    ctx.font = '700 11px "Microsoft YaHei UI", sans-serif';
+    ctx.fillText('点击选择', rect.x + 16, rect.y + 108);
+    ctx.textAlign = 'right';
+    ctx.fillText(String(index + 1), rect.x + rect.width - 14, rect.y + 20);
   });
 }
 
@@ -773,7 +902,7 @@ function drawResult(ctx, assets, state, shareStatus) {
   ctx.fillText(`${seconds}s`, 180, 213);
   ctx.fillStyle = ART.inkMuted;
   ctx.font = '700 14px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText(success ? '第二关完成' : '本次存活时间', 180, 255);
+  ctx.fillText(success ? '四关挑战完成' : '本次存活时间', 180, 255);
 
   const attemptLine = summary.badge
     ? `第 ${summary.attempt} 次挑战 · ${summary.badge}`
@@ -869,7 +998,7 @@ function createShareImage(assets, summary) {
   ctx.fillText('兔兔别慌', 540, 184, 840);
   ctx.fillStyle = '#526c67';
   ctx.font = '700 34px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('极难第二关战绩', 540, 262);
+  ctx.fillText('四关生存挑战战绩', 540, 262);
 
   const success = summary.kind === 'success';
   ctx.fillStyle = success ? '#4f8c69' : '#c64552';
@@ -877,7 +1006,7 @@ function createShareImage(assets, summary) {
   ctx.fillText(`${(summary.survivalMs / 1000).toFixed(1)}s`, 540, 458, 820);
   ctx.fillStyle = '#526c67';
   ctx.font = '700 38px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText(success ? '成功撑满 60 秒' : '本次存活时间', 540, 570);
+  ctx.fillText(success ? '成功完成四关挑战' : '本次存活时间', 540, 570);
 
   ctx.fillStyle = '#29474c';
   ctx.font = '800 42px "Microsoft YaHei UI", sans-serif';
@@ -898,7 +1027,7 @@ function createShareImage(assets, summary) {
   ctx.fillText('当前能力构筑', 540, 1102);
   ctx.fillStyle = '#29474c';
   ctx.font = '800 36px "Microsoft YaHei UI", sans-serif';
-  ctx.fillText('两关生存挑战', 540, 1262);
+  ctx.fillText('四关生存挑战', 540, 1262);
 
   return new Promise((resolve, reject) => {
     if (typeof offscreen.toBlob !== 'function') {
@@ -935,6 +1064,7 @@ export function createRenderer(canvas, assets, { reducedMotion = false, dpr = 1 
       else {
         drawWorld(ctx, assets, world, state, input, now, reducedMotion);
         if (state.phase === PHASES.UPGRADE) drawUpgradeOverlay(ctx, choices);
+        if (state.phase === PHASES.EVENT) drawEventOverlay(ctx, state.pendingEventChoices ?? []);
       }
       if (state.paused && !state.settingsOpen && state.phase !== PHASES.MENU && state.phase !== PHASES.RESULT) drawPaused(ctx);
       if (state.settingsOpen) drawSettings(ctx, settings);

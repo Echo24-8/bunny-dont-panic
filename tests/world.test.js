@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInitialState, startLevelTwo, startNewRun } from '../src/core/state.js';
+import { createInitialState, startCampaignStage, startLevelTwo, startNewRun } from '../src/core/state.js';
 import { createWorld, updateWorld } from '../src/core/world.js';
 import { MAX_WEAPON_LEVEL, WEAPON_IDS } from '../src/core/weapons.js';
 
@@ -13,6 +13,36 @@ test('world emits completion as soon as the timer reaches zero', () => {
   const events = updateWorld({ world, state, input: idleInput, dtMs: 10 });
   assert.equal(state.remainingMs, 0);
   assert.equal(events.some((event) => event.type === 'level-complete' && event.levelId === 1), true);
+});
+
+test('third stage announces and spawns at most one elite', () => {
+  const state = startNewRun(createInitialState(), 42);
+  startCampaignStage(state, 2);
+  state.readyMs = 0;
+  state.elapsedMs = 9_999;
+  const world = createWorld(() => 0.2);
+  const warning = updateWorld({ world, state, input: idleInput, dtMs: 2 });
+  assert.equal(warning.some((event) => event.type === 'elite-warning'), true);
+  state.elapsedMs = 12_999;
+  const spawned = updateWorld({ world, state, input: idleInput, dtMs: 2 });
+  assert.equal(spawned.some((event) => event.type === 'elite-spawned'), true);
+  assert.equal(world.enemies.items.filter((enemy) => enemy.active && enemy.kind === 'elite').length, 1);
+  state.elapsedMs = 20_000;
+  updateWorld({ world, state, input: idleInput, dtMs: 2 });
+  assert.equal(world.enemies.items.filter((enemy) => enemy.active && enemy.kind === 'elite').length, 1);
+});
+
+test('fourth stage spawns a boss and begins warning-based attacks', () => {
+  const state = startNewRun(createInitialState(), 9);
+  startCampaignStage(state, 3);
+  state.readyMs = 0;
+  state.elapsedMs = 4_999;
+  const world = createWorld(() => 0.5);
+  const spawned = updateWorld({ world, state, input: idleInput, dtMs: 2 });
+  assert.equal(spawned.some((event) => event.type === 'boss-spawned'), true);
+  assert.equal(world.bossState.phase, 1);
+  const warning = updateWorld({ world, state, input: idleInput, dtMs: 1_000 });
+  assert.equal(warning.some((event) => event.type === 'boss-warning'), true);
 });
 
 test('player auto-fires even before an enemy becomes targetable', () => {
@@ -409,6 +439,21 @@ test('combat collisions create distinct hit shield and damage particles', () => 
   const damageEvents = updateWorld({ world: damageWorld, state: damageState, input: idleInput, dtMs: 1 });
   assert.equal(damageEvents.some((event) => event.type === 'damaged'), true);
   assert.equal(damageWorld.particles.activeCount, 8);
+});
+
+test('collecting experience creates a small pickup feedback burst', () => {
+  const state = startNewRun(createInitialState());
+  startLevelTwo(state);
+  const world = createWorld(() => 0.5);
+  isolateLevelTwo(state, world);
+  world.pickups.acquire({ x: world.player.x, y: world.player.y, vx: 0, vy: 0, radius: 6, value: 2 });
+
+  updateWorld({ world, state, input: idleInput, dtMs: 1 });
+
+  assert.equal(state.xp, 2);
+  assert.equal(world.pickups.activeCount, 0);
+  assert.equal(world.particles.activeCount, 4);
+  world.particles.forEachActive((particle) => assert.equal(particle.kind, 'pickup'));
 });
 
 test('level one remains survivable for thirty seconds without movement', () => {

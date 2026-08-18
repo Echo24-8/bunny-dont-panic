@@ -9,7 +9,8 @@ import {
   createDefaultWeaponSlots,
   deriveWeaponStats,
   getWeaponLevel,
-  getWeaponSlot
+  getWeaponSlot,
+  getWeaponSynergyLabel
 } from '../src/core/weapons.js';
 
 test('all five weapons are available from the first run', () => {
@@ -54,4 +55,19 @@ test('weapon lookup reports equipped levels and zero for unowned weapons', () =>
   assert.equal(getWeaponLevel(build, 'carrot'), 2);
   assert.equal(getWeaponLevel(build, 'dandelion'), 0);
   assert.equal(deriveWeaponStats(build, 'dandelion').projectileCount, 0);
+});
+
+test('weapon synergies make compatible support upgrades matter', () => {
+  const base = {
+    rapidFire: 0,
+    moveSpeed: 0,
+    shield: 0,
+    weaponSlots: [{ id: 'boomerang', level: 1 }, { id: 'bubble', level: 1 }, null]
+  };
+  const supported = { ...base, moveSpeed: 3, shield: 2 };
+  assert.equal(getWeaponSynergyLabel(base, 'boomerang'), '');
+  assert.equal(getWeaponSynergyLabel(supported, 'boomerang'), '兔耳轻步：回收更快');
+  assert.equal(getWeaponSynergyLabel(supported, 'bubble'), '棉花护盾：覆盖更广');
+  assert.ok(deriveWeaponStats(supported, 'boomerang').returnAfterMs < deriveWeaponStats(base, 'boomerang').returnAfterMs);
+  assert.ok(deriveWeaponStats(supported, 'bubble').orbitRadius > deriveWeaponStats(base, 'bubble').orbitRadius);
 });

@@ -1,4 +1,6 @@
 import { LEVELS, PHASES } from './constants.js';
+import { createCampaign, getStageDefinition } from './campaign.js';
+import { createActiveSkillState } from './active-skills.js';
 import { cloneWeaponSlots, createDefaultWeaponSlots } from './weapons.js';
 
 export function createBuild() {
@@ -29,21 +31,27 @@ export function createInitialState() {
     upgradeCount: 0,
     build: createBuild(),
     invulnerableMs: 0,
+    activeSkill: { ...createActiveSkillState(), cooldownReductionMs: 0 },
+    activeShieldCharges: 0,
     shieldReady: false,
     shieldCooldownMs: 0,
     result: null,
     transitionMs: 0,
     settingsOpen: false,
-    paused: false
+    paused: false,
+    campaign: createCampaign(0),
+    activeStageIndex: 0,
+    pendingEventChoices: []
   };
 }
 
-export function startNewRun(state) {
+export function startNewRun(state, seed = Date.now()) {
   const sessionBestSurvivalMs = state.sessionBestSurvivalMs ?? 0;
+  const campaign = createCampaign(seed);
   Object.assign(state, {
     phase: PHASES.PLAYING,
     levelId: LEVELS.ONE,
-    remainingMs: 30_000,
+    remainingMs: 45_000,
     elapsedMs: 0,
     readyMs: 0,
     level2Attempt: 0,
@@ -54,13 +62,46 @@ export function startNewRun(state) {
     upgradeCount: 0,
     build: createBuild(),
     invulnerableMs: 0,
+    activeSkill: { ...createActiveSkillState(), cooldownReductionMs: 0 },
+    activeShieldCharges: 0,
     shieldReady: false,
     shieldCooldownMs: 0,
     result: null,
     transitionMs: 0,
     settingsOpen: false,
-    paused: false
+    paused: false,
+    campaign,
+    activeStageIndex: 0,
+    pendingEventChoices: []
   });
+  startCampaignStage(state, 0);
+  return state;
+}
+
+export function startCampaignStage(state, stageIndex) {
+  const definition = getStageDefinition(stageIndex);
+  if (!definition) return null;
+  state.activeStageIndex = stageIndex;
+  state.campaign ??= createCampaign(0);
+  state.campaign.stageIndex = stageIndex;
+  state.campaign.eventChoices = [];
+  state.campaign.selectedEventId = null;
+  state.pendingEventChoices = [];
+  state.phase = PHASES.PLAYING;
+  state.levelId = definition.levelId;
+  state.remainingMs = definition.durationMs;
+  state.elapsedMs = 0;
+  state.readyMs = stageIndex === 1 ? 1_000 : 0;
+  state.transitionMs = 0;
+  state.result = null;
+  state.invulnerableMs = 0;
+  state.activeSkill ??= createActiveSkillState();
+  state.activeSkill.cooldownMs = 0;
+  state.activeSkill.activeMs = 0;
+  state.activeSkill.cooldownReductionMs = state.activeSkill.cooldownReductionMs ?? 0;
+  state.activeShieldCharges = 0;
+  state.shieldReady = state.build.shield > 0;
+  state.shieldCooldownMs = 0;
   return state;
 }
 
@@ -73,17 +114,9 @@ export function beginLevelTwoTransition(state) {
 }
 
 export function startLevelTwo(state) {
-  state.phase = PHASES.PLAYING;
-  state.levelId = LEVELS.TWO;
-  state.remainingMs = 60_000;
-  state.elapsedMs = 0;
-  state.readyMs = 1_000;
+  startCampaignStage(state, 1);
   state.level2Attempt = 1;
   state.xp = 0;
-  state.invulnerableMs = 0;
-  state.shieldReady = state.build.shield > 0;
-  state.shieldCooldownMs = 0;
-  state.transitionMs = 0;
   return state;
 }
 
@@ -103,6 +136,8 @@ export function retryLevelTwoState(state) {
     upgradeCount: retainedUpgradeCount,
     build: retainedBuild,
     invulnerableMs: 0,
+    activeSkill: { ...createActiveSkillState(state.activeSkill?.id ?? 'dash'), cooldownReductionMs: 0 },
+    activeShieldCharges: 0,
     shieldReady: retainedBuild.shield > 0,
     shieldCooldownMs: 0,
     result: null,
@@ -110,11 +145,18 @@ export function retryLevelTwoState(state) {
     settingsOpen: false,
     paused: false
   });
+  state.activeStageIndex = 1;
+  state.campaign ??= createCampaign(0);
+  state.campaign.stageIndex = 1;
+  state.campaign.eventChoices = [];
+  state.campaign.selectedEventId = null;
+  state.pendingEventChoices = [];
   return state;
 }
 
 export function recordLevelTwoResult(state, kind, survivalMs) {
-  const boundedMs = Math.max(0, Math.min(60_000, survivalMs));
+  const maxDurationMs = (state.activeStageIndex ?? 1) >= 3 ? 90_000 : 60_000;
+  const boundedMs = Math.max(0, Math.min(maxDurationMs, survivalMs));
   state.sessionBestSurvivalMs = Math.max(state.sessionBestSurvivalMs ?? 0, boundedMs);
   state.result = { kind, survivalMs: boundedMs };
   return state.result;
@@ -125,6 +167,10 @@ export function takeDamage(state) {
   if (state.shieldReady) {
     state.shieldReady = false;
     state.shieldCooldownMs = shieldRechargeMs(state.build.shield);
+    return 'shielded';
+  }
+  if ((state.activeShieldCharges ?? 0) > 0) {
+    state.activeShieldCharges -= 1;
     return 'shielded';
   }
   state.health = Math.max(0, state.health - 1);

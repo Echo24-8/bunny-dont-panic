@@ -1,8 +1,11 @@
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from '../core/constants.js';
 import { createBrowserSharingAdapter } from './share-browser.js';
+import { createProgressionState, parseProgression, serializeProgression } from '../core/progression.js';
 
 const SETTINGS_KEY = 'bunny-dont-panic.settings.v1';
+const PROGRESSION_KEY = 'bunny-dont-panic.progression.v1';
 const MOVEMENT_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
+const ACTIVE_SKILL_HIT_RECT = Object.freeze({ x: 292, y: 564, width: 52, height: 52 });
 
 function normalizeVector(x, y) {
   const length = Math.hypot(x, y);
@@ -36,14 +39,21 @@ export function isJoystickTrigger(point, enabled) {
   return enabled && point.y >= LOGICAL_HEIGHT / 2;
 }
 
-function createInputAdapter(canvas) {
+function pointInRect(point, rect) {
+  return point.x >= rect.x && point.x <= rect.x + rect.width
+    && point.y >= rect.y && point.y <= rect.y + rect.height;
+}
+
+export function createInputAdapter(canvas) {
   const keys = new Set();
   const keyPulseUntil = new Map();
   const taps = [];
   const selections = [];
   const debugActions = [];
   let confirmCount = 0;
+  let activeSkillCount = 0;
   let joystickPointerId = null;
+  let activeSkillPointerId = null;
   let joystickVector = { x: 0, y: 0 };
   let joystickActive = false;
   let joystickEnabled = false;
@@ -66,6 +76,11 @@ function createInputAdapter(canvas) {
     const point = toLogical(event);
     canvas.focus({ preventScroll: true });
     if (joystickPointerId !== null) return;
+    if (pointInRect(point, ACTIVE_SKILL_HIT_RECT)) {
+      activeSkillCount += 1;
+      activeSkillPointerId = event.pointerId;
+      return;
+    }
     if (isJoystickTrigger(point, joystickEnabled)) {
       joystickPointerId = event.pointerId;
       joystickCenter = { ...point };
@@ -89,11 +104,20 @@ function createInputAdapter(canvas) {
     joystickActive = false;
   }
 
+  function cancelPointer(event) {
+    if (event.pointerId === activeSkillPointerId) {
+      activeSkillCount = Math.max(0, activeSkillCount - 1);
+      activeSkillPointerId = null;
+    }
+    releasePointer(event);
+  }
+
   function onKeyDown(event) {
     if (MOVEMENT_KEYS.has(event.code) || event.code === 'Space') event.preventDefault();
     keys.add(event.code);
     if (MOVEMENT_KEYS.has(event.code)) keyPulseUntil.set(event.code, performance.now() + 90);
     if (!event.repeat && (event.code === 'Enter' || event.code === 'Space')) confirmCount += 1;
+    if (!event.repeat && event.code === 'Space') activeSkillCount += 1;
     if (!event.repeat && /^Digit[1-3]$/.test(event.code)) selections.push(Number(event.code.at(-1)) - 1);
     if (!event.repeat && event.code === 'KeyL') debugActions.push('next-level');
     if (!event.repeat && event.code === 'KeyU') debugActions.push('upgrade');
@@ -111,6 +135,8 @@ function createInputAdapter(canvas) {
     selections.length = 0;
     debugActions.length = 0;
     confirmCount = 0;
+    activeSkillCount = 0;
+    activeSkillPointerId = null;
     joystickPointerId = null;
     joystickVector = { x: 0, y: 0 };
     joystickActive = false;
@@ -119,7 +145,7 @@ function createInputAdapter(canvas) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', releasePointer);
-  canvas.addEventListener('pointercancel', releasePointer);
+  canvas.addEventListener('pointercancel', cancelPointer);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', clear);
@@ -143,6 +169,11 @@ function createInputAdapter(canvas) {
       confirmCount -= 1;
       return true;
     },
+    consumeActiveSkill() {
+      if (activeSkillCount === 0) return false;
+      activeSkillCount -= 1;
+      return true;
+    },
     consumeSelection() {
       return selections.shift() ?? null;
     },
@@ -161,7 +192,7 @@ function createInputAdapter(canvas) {
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', releasePointer);
-      canvas.removeEventListener('pointercancel', releasePointer);
+      canvas.removeEventListener('pointercancel', cancelPointer);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clear);
@@ -181,6 +212,12 @@ function createStorageAdapter() {
     },
     saveSettings(settings) {
       try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Storage may be unavailable. */ }
+    },
+    loadProgression() {
+      try { return parseProgression(localStorage.getItem(PROGRESSION_KEY)); } catch { return createProgressionState(); }
+    },
+    saveProgression(progress) {
+      try { localStorage.setItem(PROGRESSION_KEY, serializeProgression(progress)); } catch { /* Storage may be unavailable. */ }
     }
   };
 }

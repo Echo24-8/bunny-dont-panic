@@ -3,6 +3,7 @@ import {
   MAX_WEAPON_LEVEL,
   WEAPON_DEFINITIONS,
   deriveWeaponStats,
+  getWeaponSynergyLabel,
   getWeaponLevel,
   getWeaponSlot
 } from './weapons.js';
@@ -14,7 +15,23 @@ const ABILITY_DEFINITIONS = Object.freeze([
   { id: 'heart', title: '幸运红心', description: '立即恢复一颗心', maxLevel: 1, category: 'consumable', consumable: true }
 ]);
 
+const UPGRADE_ROLE_LABELS = Object.freeze({
+  carrot: '单体追踪',
+  dandelion: '范围清场',
+  boomerang: '穿透回收',
+  bubble: '拦截防守',
+  lightning: '链式爆发',
+  rapidFire: '全武器增幅',
+  moveSpeed: '走位强化',
+  shield: '容错防守',
+  heart: '立即恢复'
+});
+
 export const UPGRADE_DEFINITIONS = Object.freeze([...WEAPON_DEFINITIONS, ...ABILITY_DEFINITIONS]);
+
+export function getUpgradeRoleLabel(id) {
+  return UPGRADE_ROLE_LABELS[id] ?? '';
+}
 
 export function upgradeThreshold(upgradeCount) {
   return 8 + 6 * upgradeCount;
@@ -50,6 +67,15 @@ export function getUpgradeChoices({ build, health, maxHealth = 3, rng = Math.ran
   }
 
   const remaining = eligible.filter((definition) => !choices.some((choice) => choice.id === definition.id));
+  const categories = ['weapon', 'ability', 'consumable'];
+  for (const category of categories) {
+    if (choices.length >= count || choices.some((choice) => choice.category === category)) continue;
+    const categoryEntries = remaining.filter((definition) => definition.category === category);
+    const selected = sampleOne(categoryEntries, rng);
+    if (!selected) continue;
+    choices.push(selected);
+    remaining.splice(remaining.indexOf(selected), 1);
+  }
   while (remaining.length > 0 && choices.length < count) {
     const index = Math.min(remaining.length - 1, Math.floor(rng() * remaining.length));
     choices.push(remaining.splice(index, 1)[0]);
@@ -68,9 +94,12 @@ export function getUpgradePreview(state, id) {
   const weaponDefinition = WEAPON_DEFINITIONS.find((definition) => definition.id === id);
   if (weaponDefinition) {
     const current = getWeaponLevel(state.build, id);
+    const synergy = getWeaponSynergyLabel(state.build, id);
     return {
       levelText: current === 0 ? '解锁' : `Lv ${current} → ${current + 1}`,
-      valueText: weaponDefinition.levelDescriptions[current]
+      valueText: synergy
+        ? `${weaponDefinition.levelDescriptions[current]} · ${synergy}`
+        : weaponDefinition.levelDescriptions[current]
     };
   }
 

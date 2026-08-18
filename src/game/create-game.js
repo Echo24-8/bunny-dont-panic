@@ -1,16 +1,20 @@
 import { LEVELS, PHASES } from '../core/constants.js';
+import { activateSkill, getActiveSkillDefinition, updateActiveSkill } from '../core/active-skills.js';
+import { createEventChoices, getEventReward, selectEvent } from '../core/campaign.js';
 import {
   beginLevelTwoTransition,
   createInitialState,
   recordLevelTwoResult,
   retryLevelTwoState,
+  startCampaignStage,
   startLevelTwo,
   startNewRun as resetRunState
 } from '../core/state.js';
 import { createResultSummary, createSharePayload } from '../core/results.js';
-import { applyUpgrade, getUpgradeChoices, getUpgradePreview, upgradeThreshold } from '../core/upgrades.js';
-import { createWorld, resetWorld, updateWorld } from '../core/world.js';
-import { createRenderer, getUpgradeCardRect, hitRect, UI_RECTS } from '../render/renderer.js';
+import { applyProgressEvent, evaluateChallenge } from '../core/progression.js';
+import { applyUpgrade, getUpgradeChoices, getUpgradePreview, getUpgradeRoleLabel, upgradeThreshold } from '../core/upgrades.js';
+import { applyActiveSkillEffects, createWorld, resetWorld, updateWorld } from '../core/world.js';
+import { createRenderer, getEventCardRect, getUpgradeCardRect, hitRect, UI_RECTS } from '../render/renderer.js';
 
 const FIXED_STEP_MS = 1000 / 60;
 const MAX_FRAME_MS = 100;
@@ -36,8 +40,12 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
   let lastDebugReport = 0;
   let shareStatus = '';
   let grazeCount = 0;
+  let skillUseCount = 0;
+  let damageTakenCount = 0;
+  let progressRecorded = false;
 
   state.phase = PHASES.MENU;
+  state.progression = platform.storage.loadProgression?.();
   platform.input.setJoystickEnabled(false);
   platform.a11y.announce('游戏已加载。选择开始冒险。');
 
@@ -58,13 +66,19 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
     platform.sharing.clearResult();
     shareStatus = '';
     grazeCount = 0;
+    skillUseCount = 0;
+    damageTakenCount = 0;
+    progressRecorded = false;
     resetRunState(state);
+    const unlockedSkills = state.progression?.unlockedSkills ?? ['dash'];
+    state.activeSkill.id = unlockedSkills[unlockedSkills.length - 1] ?? 'dash';
     resetWorld(world);
+    world.runEliteDefeated = false;
     choices = [];
     transitionMusicStarted = false;
     platform.audio.stop();
     playMusic('music1');
-    platform.a11y.announce('第一关开始，生存三十秒。');
+    platform.a11y.announce('第一关开始，生存四十五秒。主动技能已就绪。');
     setPlayingInput();
   }
 
@@ -134,6 +148,38 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
     setPlayingInput();
   }
 
+  function chooseCampaignEvent(index) {
+    const choice = state.pendingEventChoices[index];
+    if (!choice) return;
+    const selected = selectEvent(state.campaign, choice.id);
+    if (!selected) return;
+    const reward = getEventReward(selected, state);
+    state.pendingEventChoices = [];
+    const nextStageIndex = Math.min(3, state.activeStageIndex + 1);
+    startCampaignStage(state, nextStageIndex);
+    if (reward?.type === 'heal') state.health = Math.min(state.maxHealth, state.health + reward.amount);
+    else if (reward?.type === 'shield') state.activeShieldCharges = reward.charges;
+    else if (reward?.type === 'skill-cooldown') state.activeSkill.cooldownReductionMs = reward.amount;
+    else if (reward?.type === 'xp') state.xp += reward.amount;
+    resetWorld(world);
+    platform.a11y.announce(`已选择${selected.title}，进入第${nextStageIndex + 1}关。`);
+    setPlayingInput();
+  }
+
+  function activateCurrentSkill() {
+    if (state.phase !== PHASES.PLAYING || state.paused || state.settingsOpen) return false;
+    const skillState = state.activeSkill;
+    const definition = getActiveSkillDefinition(skillState?.id);
+    const result = activateSkill(skillState, definition, { direction: platform.input.readVector() });
+    if (!result.accepted) return false;
+    skillUseCount += 1;
+    handleWorldEvents(applyActiveSkillEffects(world, state, result.effects));
+    platform.audio.play('shield', { volume: 0.42 });
+    platform.haptics.pulse(12);
+    platform.a11y.announce(`${definition.title}已释放。`);
+    return true;
+  }
+
   function handleTap(point) {
     platform.audio.unlock();
     if (state.settingsOpen) {
@@ -144,10 +190,18 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
       openSettings();
       return;
     }
+    if (state.phase === PHASES.PLAYING && hitRect(point, UI_RECTS.activeSkill)) {
+      activateCurrentSkill();
+      return;
+    }
     if (state.phase === PHASES.MENU && hitRect(point, UI_RECTS.start)) startNewRun();
     else if (state.phase === PHASES.UPGRADE) {
       choices.forEach((_, index) => {
         if (hitRect(point, getUpgradeCardRect(index))) chooseUpgrade(index);
+      });
+    } else if (state.phase === PHASES.EVENT) {
+      state.pendingEventChoices.forEach((_, index) => {
+        if (hitRect(point, getEventCardRect(index))) chooseCampaignEvent(index);
       });
     } else if (state.phase === PHASES.RESULT) {
       if (hitRect(point, UI_RECTS.retry)) {
@@ -158,8 +212,10 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
 
   function handleDiscreteInput() {
     for (const tap of platform.input.consumeTaps()) handleTap(tap);
+    if (platform.input.consumeActiveSkill?.()) activateCurrentSkill();
     const selection = platform.input.consumeSelection();
     if (selection !== null && state.phase === PHASES.UPGRADE) chooseUpgrade(selection);
+    if (selection !== null && state.phase === PHASES.EVENT) chooseCampaignEvent(selection);
     const debugAction = platform.debug.enabled ? platform.input.consumeDebugAction() : null;
     if (debugAction === 'next-level' && state.phase === PHASES.PLAYING) {
       if (state.levelId === LEVELS.ONE) finishLevel(LEVELS.ONE);
@@ -191,23 +247,54 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
 
   function finishLevel(levelId) {
     resetWorld(world);
-    if (levelId === LEVELS.ONE) {
+    const stageIndex = state.activeStageIndex ?? Math.max(0, levelId - 1);
+    if (stageIndex === 0) {
       beginLevelTwoTransition(state);
       transitionMusicStarted = false;
       platform.audio.stop();
       platform.input.setJoystickEnabled(false);
       platform.a11y.announce('第一关完成。第二关难度略有提升。');
-    } else {
-      showLevelTwoResult('success', 60_000);
+    } else if (stageIndex >= 3) {
+      showLevelTwoResult('success', state.elapsedMs);
       platform.audio.stop();
       platform.audio.play('success', { volume: 0.8 });
-      platform.a11y.announce('挑战成功，第二关完成。');
+      platform.a11y.announce('挑战成功，四关完成。');
+    } else {
+      state.pendingEventChoices = createEventChoices(state.campaign, {
+        stageIndex,
+        health: state.health,
+        maxHealth: state.maxHealth
+      });
+      state.phase = PHASES.EVENT;
+      platform.input.setJoystickEnabled(false);
+      platform.a11y.announce('关卡完成，请选择一张事件卡。');
     }
   }
 
   function showLevelTwoResult(kind, survivalMs) {
     state.phase = PHASES.RESULT;
     recordLevelTwoResult(state, kind, survivalMs);
+    if (kind === 'success' && !progressRecorded) {
+      const runSummary = {
+        kind,
+        stageIndex: state.activeStageIndex,
+        skillUses: skillUseCount,
+        damageTaken: damageTakenCount,
+        eliteDefeated: world.runEliteDefeated
+      };
+      let nextProgress = state.progression ?? platform.storage.loadProgression?.();
+      for (const challengeId of ['firstClear', 'eliteHunter', 'guardianBreaker', 'skillful', 'noDamage']) {
+        if (evaluateChallenge(challengeId, runSummary)) {
+          nextProgress = applyProgressEvent(nextProgress, { type: 'challenge-complete', id: challengeId });
+          if (challengeId === 'firstClear') nextProgress = applyProgressEvent(nextProgress, { type: 'unlock-skill', id: 'cottonGuard' });
+          if (challengeId === 'guardianBreaker') nextProgress = applyProgressEvent(nextProgress, { type: 'unlock-skill', id: 'forestEcho' });
+        }
+      }
+      nextProgress = applyProgressEvent(nextProgress, { type: 'stage-complete', stageIndex: state.activeStageIndex });
+      state.progression = nextProgress;
+      platform.storage.saveProgression?.(nextProgress);
+      progressRecorded = true;
+    }
     choices = [];
     shareStatus = '';
     const summary = createResultSummary(state);
@@ -238,12 +325,29 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         platform.audio.play('shield', { volume: 0.72 });
         platform.haptics.pulse(10);
       } else if (event.type === 'damaged') {
+        damageTakenCount += 1;
         platform.audio.play('hurt', { volume: 0.8 });
         platform.haptics.pulse(22);
       } else if (event.type === 'grazed') {
         grazeCount += 1;
       } else if (event.type === 'pattern-warning') {
         platform.a11y.announce('弹幕即将变化。');
+      } else if (event.type === 'elite-warning') {
+        platform.audio.play('warning', { volume: 0.72 });
+        platform.haptics.pulse(18);
+        platform.a11y.announce('精英敌人即将出现。');
+      } else if (event.type === 'elite-spawned') {
+        platform.a11y.announce(`精英敌人出现：${event.affix}。`);
+      } else if (event.type === 'boss-spawned') {
+        platform.a11y.announce('森林守护者出现。');
+      } else if (event.type === 'boss-warning') {
+        platform.a11y.announce('Boss 攻击即将到来。');
+      } else if (event.type === 'boss-phase') {
+        platform.audio.play('warning', { volume: 0.68 });
+        platform.a11y.announce(`Boss 进入第 ${event.phase} 阶段。`);
+      } else if (event.type === 'boss-defeated') {
+        platform.audio.play('success', { volume: 0.82 });
+        platform.a11y.announce('森林守护者已击败。');
       } else if (event.type === 'defeated') {
         platform.audio.play('hurt', { volume: 0.85 });
         platform.haptics.pulse(30);
@@ -252,7 +356,11 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         platform.a11y.announce(`挑战失败，存活${(state.elapsedMs / 1000).toFixed(1)}秒。`);
       } else if (event.type === 'upgrade-ready' && state.phase === PHASES.PLAYING) {
         choices = getUpgradeChoices({ build: state.build, health: state.health, maxHealth: state.maxHealth, rng })
-          .map((choice) => ({ ...choice, preview: getUpgradePreview(state, choice.id) }));
+          .map((choice) => ({
+            ...choice,
+            preview: getUpgradePreview(state, choice.id),
+            roleLabel: getUpgradeRoleLabel(choice.id)
+          }));
         if (choices.length > 0) {
           state.phase = PHASES.UPGRADE;
           platform.input.setJoystickEnabled(false);
@@ -271,7 +379,9 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         playMusic('music2');
       }
       if (state.transitionMs <= 0) {
-        startLevelTwo(state);
+        startCampaignStage(state, 1);
+        state.level2Attempt = 1;
+        state.xp = 0;
         resetWorld(world);
         setPlayingInput();
         platform.a11y.announce('第二关开始，生存六十秒。');
@@ -279,6 +389,9 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
       return;
     }
     if (state.phase !== PHASES.PLAYING) return;
+    const skillWasActive = state.activeSkill?.activeMs > 0;
+    updateActiveSkill(state.activeSkill, dtMs);
+    if (skillWasActive && state.activeSkill.activeMs <= 0) state.activeShieldCharges = 0;
     const input = platform.input.readVector();
     handleWorldEvents(updateWorld({ world, state, input, dtMs }));
   }
@@ -325,6 +438,12 @@ export function createGame({ canvas, platform, assets, rng = Math.random }) {
         enemyBullets: world.enemyBullets.activeCount,
         patternBand: world.patternBand,
         patternWarningBand: world.patternWarning?.nextBand ?? 0,
+        stageIndex: state.activeStageIndex,
+        activeSkillId: state.activeSkill?.id ?? '',
+        activeSkillCooldownMs: state.activeSkill?.cooldownMs?.toFixed(0) ?? '0',
+        eventChoiceCount: state.pendingEventChoices?.length ?? 0,
+        eliteCount: world.enemies.items.filter((enemy) => enemy.active && enemy.kind === 'elite').length,
+        bossPhase: world.bossState?.phase ?? 0,
         grazeCount,
         fps: fps.toFixed(1),
         musicEnabled: settings.music,

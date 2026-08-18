@@ -6,6 +6,8 @@ export const PHASES = Object.freeze({
   MENU: 'menu',
   PLAYING: 'playing',
   UPGRADE: 'upgrade',
+  EVENT: 'event',
+  EVENT_CHOICE: 'event',
   TRANSITION: 'transition',
   RESULT: 'result',
   ERROR: 'error'
@@ -13,7 +15,9 @@ export const PHASES = Object.freeze({
 
 export const LEVELS = Object.freeze({
   ONE: 1,
-  TWO: 2
+  TWO: 2,
+  THREE: 3,
+  FOUR: 4
 });
 
 export const POOL_LIMITS = Object.freeze({

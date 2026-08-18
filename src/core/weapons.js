@@ -76,9 +76,17 @@ export function getWeaponLevel(build, id) {
   return getWeaponSlot(build, id)?.level ?? 0;
 }
 
+export function getWeaponSynergyLabel(build, id) {
+  if (id === 'boomerang' && (build?.moveSpeed ?? 0) > 0) return '兔耳轻步：回收更快';
+  if (id === 'bubble' && (build?.shield ?? 0) > 0) return '棉花护盾：覆盖更广';
+  return '';
+}
+
 export function deriveWeaponStats(build, id) {
   const level = Math.min(MAX_WEAPON_LEVEL, Math.max(0, getWeaponLevel(build, id)));
   const rapidMultiplier = 0.9 ** (build?.rapidFire ?? 0);
+  const moveSpeedLevel = Math.min(6, Math.max(0, build?.moveSpeed ?? 0));
+  const shieldLevel = Math.min(5, Math.max(0, build?.shield ?? 0));
   const definitions = {
     carrot: {
       projectileCount: [0, 1, 1, 2][level],
@@ -100,13 +108,13 @@ export function deriveWeaponStats(build, id) {
       speed: [0, 300, 330, 360][level],
       damage: [0, 1.3, 1.6, 1.9][level],
       maxTargets: [0, 3, 5, 7][level],
-      returnAfterMs: [0, 620, 570, 520][level]
+      returnAfterMs: [0, 620, 570, 520][level] * Math.max(0.76, 1 - moveSpeedLevel * 0.04)
     },
     bubble: {
       projectileCount: level,
       fireIntervalMs: [Infinity, 2400, 2100, 1800][level] * rapidMultiplier,
       damage: [0, 0.7, 0.85, 1][level],
-      orbitRadius: 31,
+      orbitRadius: level > 0 ? 31 + shieldLevel * 3 : 31,
       hitCooldownMs: 380
     },
     lightning: {
@@ -118,4 +126,3 @@ export function deriveWeaponStats(build, id) {
   };
   return { id, level, ...(definitions[id] ?? { projectileCount: 0, fireIntervalMs: Infinity }) };
 }
-

@@ -6,6 +6,7 @@ import {
   createInitialState,
   recordLevelTwoResult,
   retryLevelTwoState,
+  startCampaignStage,
   startLevelTwo,
   startNewRun,
   takeDamage
@@ -15,7 +16,9 @@ test('new run starts level one with clean health and build', () => {
   const state = startNewRun(createInitialState());
   assert.equal(state.phase, PHASES.PLAYING);
   assert.equal(state.levelId, 1);
-  assert.equal(state.remainingMs, 30_000);
+  assert.equal(state.remainingMs, 45_000);
+  assert.equal(state.activeStageIndex, 0);
+  assert.equal(state.campaign.stageIndex, 0);
   assert.equal(state.health, 3);
   assert.deepEqual(state.build, {
     rapidFire: 0,
@@ -25,6 +28,17 @@ test('new run starts level one with clean health and build', () => {
   });
   assert.equal('splitShot' in state.build, false);
   assert.equal('pierce' in state.build, false);
+});
+
+test('campaign stage transition applies authored duration and level', () => {
+  const state = startNewRun(createInitialState(), 123);
+  startCampaignStage(state, 2);
+  assert.equal(state.activeStageIndex, 2);
+  assert.equal(state.levelId, 3);
+  assert.equal(state.remainingMs, 75_000);
+  assert.equal(state.elapsedMs, 0);
+  assert.equal(state.readyMs, 0);
+  assert.equal(state.campaign.stageIndex, 2);
 });
 
 test('transition preserves health and build into level two', () => {

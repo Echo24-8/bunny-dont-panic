@@ -7,6 +7,7 @@ import {
   derivePlayerStats,
   getUpgradeChoices,
   getUpgradePreview,
+  getUpgradeRoleLabel,
   upgradeThreshold
 } from '../src/core/upgrades.js';
 
@@ -21,6 +22,14 @@ test('choices are unique and exclude heart at full health', () => {
   assert.equal(choices.length, 3);
   assert.equal(new Set(choices.map((choice) => choice.id)).size, 3);
   assert.equal(choices.some((choice) => choice.id === 'heart'), false);
+});
+
+test('upgrade choices cover distinct categories when eligible', () => {
+  const state = startNewRun(createInitialState());
+  const choices = getUpgradeChoices({ build: state.build, health: state.health, rng: () => 0.5 });
+  assert.equal(choices.some((choice) => choice.category === 'weapon'), true);
+  assert.equal(choices.some((choice) => choice.category === 'ability'), true);
+  assert.equal(new Set(choices.map((choice) => choice.category)).size >= 2, true);
 });
 
 test('all five weapons are present in the first-run upgrade pool', () => {
@@ -131,4 +140,17 @@ test('upgrade previews match the applied combat values', () => {
   assert.equal(getUpgradePreview(weaponState, 'dandelion').levelText, '解锁');
   applyUpgrade(weaponState, 'dandelion');
   assert.equal(getUpgradePreview(weaponState, 'dandelion').levelText, 'Lv 1 → 2');
+
+  weaponState.build.weaponSlots[1] = { id: 'boomerang', level: 1 };
+  weaponState.build.moveSpeed = 1;
+  assert.match(getUpgradePreview(weaponState, 'boomerang').valueText, /兔耳轻步：回收更快/);
+});
+
+test('upgrade roles make weapon and ability choices legible', () => {
+  assert.equal(getUpgradeRoleLabel('carrot'), '单体追踪');
+  assert.equal(getUpgradeRoleLabel('dandelion'), '范围清场');
+  assert.equal(getUpgradeRoleLabel('bubble'), '拦截防守');
+  assert.equal(getUpgradeRoleLabel('rapidFire'), '全武器增幅');
+  assert.equal(getUpgradeRoleLabel('heart'), '立即恢复');
+  assert.equal(getUpgradeRoleLabel('unknown'), '');
 });
